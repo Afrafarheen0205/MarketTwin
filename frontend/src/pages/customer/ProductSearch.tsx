@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -28,14 +28,23 @@ const { Search } = Input;
 export const ProductSearch: React.FC = () => {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const [products, setProducts] = useState<any[]>([]);
+  useEffect(() => {
+    const load = async () => {
+      if (!supabase) return;
+      const { data } = await supabase.from('products').select('*');
+      setProducts(data ?? []);
+    };
+    load();
+  }, []);
 
-  const searchResults = mockProducts.filter((p) =>
+  const searchResults = products.filter((p) =>
     p.name.toLowerCase().includes(query.toLowerCase()) ||
     p.category.toLowerCase().includes(query.toLowerCase()) ||
     p.sku.toLowerCase().includes(query.toLowerCase())
   );
 
-  const columns: ColumnsType<ProductItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Product',
       dataIndex: 'name',

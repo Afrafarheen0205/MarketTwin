@@ -39,7 +39,7 @@ export const DemandManagement: React.FC = () => {
   const [timeRange, setTimeRange] = useState('Today');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
-  const [viewingDemand, setViewingDemand] = useState<DemandItem | null>(null);
+  const [viewingDemand, setViewingDemand] = useState<any | null>(null);
 
   const handleSync = () => {
     setSyncing(true);
@@ -59,7 +59,7 @@ export const DemandManagement: React.FC = () => {
     return matchesSearch && matchesStatus && matchesCat;
   });
 
-  const columns: ColumnsType<DemandItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Demand Code',
       dataIndex: 'demandCode',

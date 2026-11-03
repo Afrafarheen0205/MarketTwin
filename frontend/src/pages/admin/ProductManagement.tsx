@@ -27,7 +27,7 @@ import {
   ShoppingOutlined,
   ArrowUpOutlined,
 } from '@ant-design/icons';
-// mock data removed
+import { supabase } from '../../services/supabase';
 
 const { Title, Text } = Typography;
 
@@ -60,7 +60,7 @@ export const ProductManagement: React.FC = () => {
   };
 
   const handleAddProduct = (values: any) => {
-    const newProd: ProductItem = {
+    const newProd: any = {
       id: `prod-${Date.now()}`,
       name: values.name,
       category: values.category,
@@ -90,7 +90,7 @@ export const ProductManagement: React.FC = () => {
     return matchesSearch && matchesCat;
   });
 
-  const columns: ColumnsType<ProductItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Product Title',
       dataIndex: 'name',

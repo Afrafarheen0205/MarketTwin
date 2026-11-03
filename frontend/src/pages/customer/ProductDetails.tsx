@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Row,
@@ -30,7 +30,16 @@ export const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const product = mockProducts.find((p) => p.id === id) || mockProducts[0];
+  const [product, setProduct] = useState<any>(null);
+  useEffect(() => {
+    const load = async () => {
+      if (!supabase || !id) return;
+      const { data } = await supabase.from('products').select('*').eq('id', id).single();
+      setProduct(data);
+    };
+    load();
+  }, [id]);
+  if (!product) return <div style={{ padding: 40, textAlign: 'center', color: '#6B778C' }}>No data available yet</div>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -150,7 +159,7 @@ export const ProductDetails: React.FC = () => {
         <Descriptions bordered size="middle" column={{ xs: 1, sm: 2, md: 3 }} style={{ background: '#FFFFFF' }}>
           {Object.entries(product.specs).map(([key, value]) => (
             <Descriptions.Item label={key} key={key}>
-              <strong>{value}</strong>
+              <strong>{String(value)}</strong>
             </Descriptions.Item>
           ))}
           <Descriptions.Item label="Fulfillment Model">

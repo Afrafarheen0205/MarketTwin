@@ -41,7 +41,7 @@ export const OfferManagement: React.FC = () => {
   const [timeRange, setTimeRange] = useState('Today');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
-  const [viewingOffer, setViewingOffer] = useState<OfferItem | null>(null);
+  const [viewingOffer, setViewingOffer] = useState<any | null>(null);
 
   const handleSync = () => {
     setSyncing(true);
@@ -61,7 +61,7 @@ export const OfferManagement: React.FC = () => {
     return matchesSearch && matchesStatus && matchesMerchant;
   });
 
-  const columns: ColumnsType<OfferItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Offer Code',
       dataIndex: 'offerCode',

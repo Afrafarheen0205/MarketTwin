@@ -40,7 +40,7 @@ export const OrderManagement: React.FC = () => {
   const [timeRange, setTimeRange] = useState('Today');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
-  const [viewingOrder, setViewingOrder] = useState<OrderItem | null>(null);
+  const [viewingOrder, setViewingOrder] = useState<any | null>(null);
 
   const handleSync = () => {
     setSyncing(true);
@@ -62,7 +62,7 @@ export const OrderManagement: React.FC = () => {
     return matchesSearch && matchesStatus && matchesCarrier;
   });
 
-  const columns: ColumnsType<OrderItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Order ID',
       dataIndex: 'orderNumber',
