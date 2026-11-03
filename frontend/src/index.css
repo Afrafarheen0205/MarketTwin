@@ -1,0 +1,266 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary-color: #1677FF;
+    --primary-navy: #172B4D;
+    --text-primary: #172B4D;
+    --text-secondary: #64748B;
+    --bg-layout: #F5F7FA;
+    --bg-card: #FFFFFF;
+    --border-color: #E2E8F0;
+  }
+
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    background-color: #F5F7FA;
+    color: #172B4D;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom modern scrollbar for light theme */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F5F7FA;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Ant Design light overrides for seamless spacious SaaS feel */
+.ant-layout {
+  background: #F5F7FA !important;
+}
+
+.ant-layout-header {
+  background: #FFFFFF !important;
+  border-bottom: 1px solid #E2E8F0;
+  padding: 0 32px;
+}
+
+.ant-layout-sider {
+  background: #FFFFFF !important;
+  border-right: 1px solid #E2E8F0;
+}
+
+/* Sidebar Active Menu Item - Admin Gradient Pill */
+.admin-sidebar .ant-menu-item-selected {
+  background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%) !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35) !important;
+  font-weight: 600 !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-size: 14.5px !important;
+}
+
+.admin-sidebar .ant-menu-item-selected .ant-menu-item-icon,
+.admin-sidebar .ant-menu-item-selected a,
+.admin-sidebar .ant-menu-item-selected span {
+  color: #FFFFFF !important;
+}
+
+.admin-sidebar .ant-menu-item {
+  border-radius: 10px !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-weight: 500;
+  font-size: 14.5px;
+  color: #475569;
+}
+
+.admin-sidebar .ant-menu-item:hover:not(.ant-menu-item-selected) {
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
+}
+
+/* Sidebar Active Menu Item - Customer Gradient Pill (Blue/Indigo) */
+.customer-sidebar .ant-menu-item-selected {
+  background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%) !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+  font-weight: 600 !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-size: 14.5px !important;
+}
+
+.customer-sidebar .ant-menu-item-selected .ant-menu-item-icon,
+.customer-sidebar .ant-menu-item-selected a,
+.customer-sidebar .ant-menu-item-selected span {
+  color: #FFFFFF !important;
+}
+
+.customer-sidebar .ant-menu-item {
+  border-radius: 10px !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-weight: 500;
+  font-size: 14.5px;
+  color: #475569;
+}
+
+.customer-sidebar .ant-menu-item:hover:not(.ant-menu-item-selected) {
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
+}
+
+/* Sidebar Active Menu Item - Merchant Gradient Pill (Emerald/Teal) */
+.merchant-sidebar .ant-menu-item-selected {
+  background: linear-gradient(135deg, #059669 0%, #0D9488 100%) !important;
+  color: #FFFFFF !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35) !important;
+  font-weight: 600 !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-size: 14.5px !important;
+}
+
+.merchant-sidebar .ant-menu-item-selected .ant-menu-item-icon,
+.merchant-sidebar .ant-menu-item-selected a,
+.merchant-sidebar .ant-menu-item-selected span {
+  color: #FFFFFF !important;
+}
+
+.merchant-sidebar .ant-menu-item {
+  border-radius: 10px !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  height: 46px !important;
+  line-height: 46px !important;
+  width: calc(100% - 20px) !important;
+  font-weight: 500;
+  font-size: 14.5px;
+  color: #475569;
+}
+
+.merchant-sidebar .ant-menu-item:hover:not(.ant-menu-item-selected) {
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
+}
+
+/* Common smooth animations */
+button, .ant-btn, .ant-card, .ant-menu-item {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Filter Pill Select overrides - scaled up */
+.filter-pill-select .ant-select-selector {
+  border-radius: 24px !important;
+  border-color: #E2E8F0 !important;
+  background-color: #FFFFFF !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 16px !important;
+}
+
+/* Custom Table Styles matching screenshot - scaled up for desktop presence */
+.market-offers-table .ant-table-thead > tr > th {
+  background: #FFFFFF !important;
+  color: #64748B !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid #F1F5F9 !important;
+  text-transform: none;
+  padding: 16px 20px !important;
+}
+
+.market-offers-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #F8FAFC !important;
+  padding: 18px 20px !important;
+  font-size: 14px !important;
+  vertical-align: middle;
+}
+
+.market-offers-table .ant-table-tbody > tr:hover > td {
+  background: #FAFAFC !important;
+}
+
+.activity-table .ant-table-thead > tr > th {
+  background: #FFFFFF !important;
+  color: #64748B !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid #F1F5F9 !important;
+  padding: 14px 18px !important;
+}
+
+.activity-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #F8FAFC !important;
+  padding: 15px 18px !important;
+  font-size: 14px !important;
+}
+
+.activity-table .ant-table-tbody > tr:hover > td {
+  background: #FAFAFC !important;
+}
+
+.ant-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+  border-color: #E2E8F0 !important;
+}
+
+.ant-card-hoverable:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08) !important;
+}
+
+.ant-table-wrapper .ant-table {
+  background: #FFFFFF !important;
+}
+
+.ant-table-thead > tr > th {
+  background: #F8FAFC !important;
+  color: #172B4D !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  border-bottom: 1px solid #E2E8F0 !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid #F1F5F9 !important;
+  color: #172B4D;
+  font-size: 14px;
+}

@@ -1,0 +1,97 @@
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.api.v1.router import api_router
+from app.core.config import get_settings
+from app.core.exceptions import (
+    MarketTwinException,
+    generic_exception_handler,
+    http_exception_handler,
+    markettwin_exception_handler,
+    validation_exception_handler,
+)
+from app.core.supabase import check_supabase_health
+
+# Configure Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("markettwin.app")
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan context manager for startup and shutdown events."""
+    logger.info("=" * 60)
+    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
+    logger.info(f"Environment: {settings.ENVIRONMENT} | Debug: {settings.DEBUG}")
+    logger.info(f"Allowed CORS Origins: {settings.cors_origins}")
+    db_status, db_msg = check_supabase_health()
+    logger.info(f"Supabase Status: {db_status} ({db_msg})")
+    logger.info("=" * 60)
+    yield
+    logger.info(f"Shutting down {settings.PROJECT_NAME}...")
+
+
+def create_application() -> FastAPI:
+    """FastAPI Application Factory."""
+    application = FastAPI(
+        title=settings.PROJECT_NAME,
+        version=settings.VERSION,
+        description="MarketTwin - Demand-Driven Marketplace API. Groups buyer demands and aggregates competitive merchant offers.",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
+    )
+
+    # Configure CORS Middleware
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Register Exception Handlers
+    application.add_exception_handler(MarketTwinException, markettwin_exception_handler)
+    application.add_exception_handler(RequestValidationError, validation_exception_handler)
+    application.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    application.add_exception_handler(Exception, generic_exception_handler)
+
+    # Register API Routers
+    application.include_router(api_router, prefix=settings.API_V1_STR)
+
+    # Direct Health Check Alias at root /health
+    @application.get("/health", include_in_schema=True, tags=["Health & System Diagnostics"])
+    async def root_health():
+        from app.api.v1.endpoints.health import get_health
+        return await get_health()
+
+    @application.get("/health/ping", include_in_schema=True, tags=["Health & System Diagnostics"])
+    async def root_health_ping():
+        from app.api.v1.endpoints.health import ping
+        return await ping()
+
+    # Root welcome / meta endpoint
+    @application.get("/", include_in_schema=False)
+    async def root():
+        return {
+            "name": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "environment": settings.ENVIRONMENT,
+            "documentation": "/docs",
+            "health_check": "/api/v1/health",
+        }
+
+    return application
+
+
+app = create_application()

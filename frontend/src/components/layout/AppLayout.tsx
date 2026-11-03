@@ -1,0 +1,698 @@
+import React, { useState, useEffect } from 'react';
+import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
+import {
+  Layout,
+  Menu,
+  Button,
+  Badge,
+  Avatar,
+  Dropdown,
+  Space,
+  Tag,
+  Typography,
+  Tooltip,
+  Breadcrumb,
+  Popover,
+  List,
+  Segmented,
+  Input,
+} from 'antd';
+import type { MenuProps } from 'antd';
+import {
+  DashboardOutlined,
+  ShoppingOutlined,
+  SearchOutlined,
+  FileAddOutlined,
+  AppstoreOutlined,
+  TeamOutlined,
+  TagsOutlined,
+  DiffOutlined,
+  InboxOutlined,
+  BellOutlined,
+  UserOutlined,
+  ShopOutlined,
+  SafetyCertificateOutlined,
+  LineChartOutlined,
+  SettingOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  SyncOutlined,
+  DatabaseOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  CarOutlined,
+  SwapOutlined,
+  DownOutlined,
+  DollarCircleOutlined,
+  LogoutOutlined,
+  CustomerServiceOutlined,
+} from '@ant-design/icons';
+import healthApi from '../../api/healthApi';
+import { HealthResponse } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import { env, isSupabaseConfigured } from '../../config/env';
+// mock data removed; notifications are loaded from Supabase when available
+
+const { Header, Sider, Content, Footer } = Layout;
+const { Text } = Typography;
+
+export type ActiveRole = 'customer' | 'merchant' | 'admin';
+
+export const AppLayout: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const { user, role: authRole, signOut } = useAuth();
+  const currentPath = location.pathname;
+  const activeRole: ActiveRole = authRole === 'merchant' ? 'merchant' : authRole === 'admin' ? 'admin' : 'customer';
+
+  const [collapsed, setCollapsed] = useState(false);
+  const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
+  const [healthData, setHealthData] = useState<HealthResponse | null>(null);
+  const [pinging, setPinging] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+
+  // Backend Health Polling
+  const checkHealth = async () => {
+    setPinging(true);
+    try {
+      const res = await healthApi.checkHealth();
+      setHealthData(res);
+      setIsBackendHealthy(res.status === 'ok');
+    } catch {
+      setIsBackendHealthy(false);
+      setHealthData(null);
+    } finally {
+      setPinging(false);
+    }
+  };
+
+  useEffect(() => {
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Customer Navigation Items
+  const customerMenuItems: MenuProps['items'] = [
+    {
+      key: '/customer/dashboard',
+      icon: <DashboardOutlined />,
+      label: 'Home Dashboard',
+    },
+    {
+      key: 'catalogue-group',
+      icon: <ShoppingOutlined />,
+      label: 'Products',
+      children: [
+        { key: '/customer/catalogue', label: 'Product Catalogue' },
+        { key: '/customer/search', label: 'Search Products', icon: <SearchOutlined /> },
+      ],
+    },
+    {
+      key: 'demands-group',
+      icon: <AppstoreOutlined />,
+      label: 'Demands',
+      children: [
+        { key: '/customer/demands', label: 'My Demands' },
+        { key: '/customer/demands/create', label: 'Create Demand', icon: <FileAddOutlined /> },
+        { key: '/customer/groups', label: 'Demand Groups', icon: <TeamOutlined /> },
+      ],
+    },
+    {
+      key: 'offers-group',
+      icon: <TagsOutlined />,
+      label: 'Offers',
+      children: [
+        { key: '/customer/offers', label: 'Merchant Offers' },
+        { key: '/customer/compare', label: 'Offer Comparison', icon: <DiffOutlined /> },
+      ],
+    },
+    {
+      key: '/customer/orders',
+      icon: <InboxOutlined />,
+      label: 'Orders & Tracking',
+    },
+    {
+      key: '/customer/notifications',
+      icon: <BellOutlined />,
+      label: 'Notifications',
+    },
+    {
+      key: '/customer/profile',
+      icon: <UserOutlined />,
+      label: 'Customer Profile',
+    },
+  ];
+
+  // Merchant Navigation Items
+  const merchantMenuItems: MenuProps['items'] = [
+    {
+      key: '/merchant/dashboard',
+      icon: <DashboardOutlined />,
+      label: 'Merchant Dashboard',
+    },
+    {
+      key: '/merchant/demands',
+      icon: <TeamOutlined />,
+      label: 'Available Demands',
+    },
+    {
+      key: 'offers-group',
+      icon: <TagsOutlined />,
+      label: 'Offer Management',
+      children: [
+        { key: '/merchant/offers/submit', label: 'Submit Offers', icon: <FileAddOutlined /> },
+        { key: '/merchant/offers', label: 'My Submitted Offers' },
+      ],
+    },
+    {
+      key: '/merchant/orders',
+      icon: <InboxOutlined />,
+      label: 'Fulfillment Orders',
+    },
+    {
+      key: '/merchant/profile',
+      icon: <ShopOutlined />,
+      label: 'Merchant Profile',
+    },
+  ];
+
+  // Admin Navigation Items (SaaS design aligned with reference)
+  const adminMenuItems: MenuProps['items'] = [
+    {
+      key: '/admin/dashboard',
+      icon: <DashboardOutlined />,
+      label: 'Overview',
+    },
+    {
+      key: '/admin/offers',
+      icon: <TagsOutlined />,
+      label: 'Campaigns & Offers',
+    },
+    {
+      key: '/admin/products',
+      icon: <ShoppingOutlined />,
+      label: 'Product Catalog',
+    },
+    {
+      key: 'targeting-group',
+      icon: <TeamOutlined />,
+      label: 'Targeting & Demands',
+      children: [
+        { key: '/admin/demands', label: 'Customer Demands' },
+        { key: '/admin/groups', label: 'Demand Groups' },
+      ],
+    },
+    {
+      key: '/admin/reports',
+      icon: <LineChartOutlined />,
+      label: 'Performance',
+    },
+    {
+      key: 'payouts-group',
+      icon: <DollarCircleOutlined />,
+      label: 'Payouts & Escrow',
+      children: [
+        { key: '/admin/orders', label: 'Platform Orders' },
+        { key: '/admin/merchants', label: 'Merchant Accounts' },
+        { key: '/admin/customers', label: 'Customer Accounts' },
+      ],
+    },
+  ];
+
+  let currentMenuItems = customerMenuItems;
+  if (activeRole === 'merchant') currentMenuItems = merchantMenuItems;
+  if (activeRole === 'admin') currentMenuItems = adminMenuItems;
+
+  // Selected key helper
+  const selectedKeys = [location.pathname];
+
+  // Generate breadcrumb items
+  const pathSnippets = location.pathname.split('/').filter((i) => i);
+  const breadcrumbItems = [
+    {
+      title: <Link to="/">Home</Link>,
+    },
+    ...pathSnippets.map((snippet, index) => {
+      const url = `/${pathSnippets.slice(0, index + 1).join('/')}`;
+      const title = snippet.charAt(0).toUpperCase() + snippet.slice(1).replace('-', ' ');
+      return {
+        title: index === pathSnippets.length - 1 ? <span>{title}</span> : <Link to={url}>{title}</Link>,
+      };
+    }),
+  ];
+
+  const unreadCount = notifications.filter((n) => n.unread).length;
+
+  const notificationContent = (
+    <div style={{ width: 340 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid #EBECF0' }}>
+        <Text strong style={{ fontSize: 14 }}>Notifications</Text>
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setNotifications(notifications.map((n) => ({ ...n, unread: false })))}
+        >
+          Mark all as read
+        </Button>
+      </div>
+      <List
+        size="small"
+        itemLayout="horizontal"
+        dataSource={notifications.slice(0, 4)}
+        renderItem={(item) => (
+          <List.Item
+            style={{
+              padding: '8px 4px',
+              backgroundColor: item.unread ? '#F0F7FF' : 'transparent',
+              borderRadius: 6,
+              marginBottom: 4,
+            }}
+          >
+            <List.Item.Meta
+              avatar={
+                <Avatar
+                  size="small"
+                  style={{
+                    backgroundColor: item.type === 'offer' ? '#1677FF' : item.type === 'demand' ? '#52C41A' : '#722ED1',
+                  }}
+                  icon={item.type === 'offer' ? <TagsOutlined /> : item.type === 'demand' ? <TeamOutlined /> : <InboxOutlined />}
+                />
+              }
+              title={<span style={{ fontSize: 13, fontWeight: item.unread ? 600 : 400 }}>{item.title}</span>}
+              description={
+                <div>
+                  <div style={{ fontSize: 12, color: '#6B778C' }}>{item.description}</div>
+                  <div style={{ fontSize: 10, color: '#8993A4', marginTop: 2 }}>{item.time}</div>
+                </div>
+              }
+            />
+          </List.Item>
+        )}
+      />
+      <div style={{ textAlign: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid #EBECF0' }}>
+        <Button type="link" size="small" onClick={() => navigate('/customer/notifications')}>
+          View all notifications
+        </Button>
+      </div>
+    </div>
+  );
+
+  const profileMenuItems: MenuProps['items'] = [
+    {
+      key: 'dashboard',
+      label: 'My Dashboard',
+      onClick: () => navigate(`/${activeRole}/dashboard`),
+    },
+    { type: 'divider' },
+    {
+      key: 'profile-view',
+      label: (
+        <div>
+          <div style={{ fontWeight: 600, color: '#172B4D' }}>Alex Mercer</div>
+          <div style={{ fontSize: 12, color: '#6B778C' }}>alex.mercer@techstart.io</div>
+          <Tag color="blue" style={{ marginTop: 4 }}>Role: {activeRole.toUpperCase()}</Tag>
+        </div>
+      ),
+    },
+    { type: 'divider' },
+    {
+      key: 'settings',
+      icon: <SettingOutlined />,
+      label: 'Account Preferences',
+      onClick: () => navigate(`/${activeRole}/profile`),
+    },
+    { type: 'divider' },
+    {
+      key: 'logout',
+      icon: <CloseCircleOutlined />,
+      label: 'Logout',
+      onClick: async () => {
+        await signOut();
+        navigate('/login', { replace: true });
+      },
+    },
+  ];
+
+  return (
+    <Layout style={{ minHeight: '100vh', background: '#F5F7FA' }}>
+      {/* Sider Navigation */}
+      {user && (
+      <Sider
+        collapsible
+        collapsed={collapsed}
+        onCollapse={(value) => setCollapsed(value)}
+        width={280}
+        theme="light"
+        style={{
+          borderRight: '1px solid #E2E8F0',
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
+          zIndex: 100,
+          background: '#FFFFFF',
+        }}
+      >
+        {/* Brand Header */}
+        <div
+          style={{
+            height: 72,
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 22px',
+            borderBottom: '1px solid #E2E8F0',
+            cursor: 'pointer',
+          }}
+          onClick={() => navigate('/')}
+        >
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#FFFFFF',
+              fontWeight: 800,
+              fontSize: 17,
+              boxShadow: '0 2px 10px rgba(79, 70, 229, 0.35)',
+              marginRight: collapsed ? 0 : 12,
+              flexShrink: 0,
+            }}
+          >
+            MT
+          </div>
+          {!collapsed && (
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 18, color: '#0F172A', lineHeight: 1.2 }}>
+                Market<span style={{ color: '#4F46E5' }}>Twin</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, letterSpacing: 0.5 }}>
+                DEMAND-DRIVEN B2B
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Current Active Role Badge */}
+        {!collapsed && (
+          <div style={{ padding: '14px 18px 6px 18px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                background: '#F8FAFC',
+                borderRadius: 10,
+                border: '1px solid #E2E8F0',
+              }}
+            >
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Active Module
+              </span>
+              <Tag
+                color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
+                style={{ margin: 0, textTransform: 'capitalize', fontWeight: 700, borderRadius: 14, padding: '2px 10px', fontSize: 12 }}
+              >
+                {activeRole}
+              </Tag>
+            </div>
+          </div>
+        )}
+
+        {/* Nav Menu */}
+        <div
+          className={
+            activeRole === 'admin'
+              ? 'admin-sidebar'
+              : activeRole === 'merchant'
+              ? 'merchant-sidebar'
+              : 'customer-sidebar'
+          }
+          style={{
+            overflowY: 'auto',
+            height: !collapsed ? 'calc(100vh - 250px)' : 'calc(100vh - 140px)',
+            paddingTop: 8,
+          }}
+        >
+          <Menu
+            mode="inline"
+            selectedKeys={selectedKeys}
+            items={currentMenuItems}
+            onClick={({ key }) => {
+              navigate(key);
+            }}
+            style={{ borderRight: 0 }}
+          />
+        </div>
+
+        {/* Bottom Menu Items (Styled like reference SaaS navigation) */}
+        {!collapsed && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: '10px 16px',
+              borderTop: '1px solid #F1F5F9',
+              background: '#FFFFFF',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div
+                onClick={() => {
+                  if (activeRole === 'admin') navigate('/admin/dashboard');
+                  else if (activeRole === 'merchant') navigate('/merchant/profile');
+                  else navigate('/customer/profile');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: '#64748B',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F8FAFC')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <UserOutlined style={{ fontSize: 14 }} />
+                <span>
+                  {activeRole === 'admin' ? 'Admin Overview' : activeRole === 'merchant' ? 'Merchant Profile' : 'My Account'}
+                </span>
+              </div>
+              <div
+                onClick={() => navigate('/customer/notifications')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: '#64748B',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F8FAFC')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <BellOutlined style={{ fontSize: 14 }} />
+                <span>Notifications</span>
+              </div>
+              <div
+                onClick={() => navigate('/')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: '#94A3B8',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F8FAFC')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <LogoutOutlined style={{ fontSize: 14 }} />
+                <span>Sign Out</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </Sider>
+      )}
+
+      {/* Main Content Area */}
+      <Layout style={{ background: '#F5F7FA' }}>
+        {/* Top Header */}
+        <Header
+          style={{
+            background: '#FFFFFF',
+            borderBottom: '1px solid #E2E8F0',
+            padding: '0 32px',
+            height: 72,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            position: 'sticky',
+            top: 0,
+            zIndex: 90,
+          }}
+        >
+          {/* Left: Collapse Button + Breadcrumbs directly in Header */}
+          <Space orientation="horizontal" size={16} align="center">
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed(!collapsed)}
+              style={{ fontSize: 18, color: '#475569' }}
+            />
+
+            <Breadcrumb items={breadcrumbItems} style={{ fontSize: 13.5 }} />
+          </Space>
+
+          {/* Center: Global Search Input matching reference */}
+          <div style={{ flex: '0 1 460px', margin: '0 20px' }} className="hidden md:block">
+            <Input
+              placeholder="Search across the app..."
+              prefix={<SearchOutlined style={{ color: '#94A3B8', marginRight: 8, fontSize: 15 }} />}
+              suffix={
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    backgroundColor: '#F1F5F9',
+                    color: '#64748B',
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #E2E8F0',
+                    fontWeight: 600,
+                  }}
+                >
+                  ⌘/
+                </span>
+              }
+              style={{
+                borderRadius: 24,
+                backgroundColor: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                height: 42,
+                fontSize: 14,
+                padding: '0 16px',
+              }}
+            />
+          </div>
+
+          {/* Right: Switch Role + Backend Indicator + Bell + User Icon + Avatar + Account ▾ */}
+          <Space orientation="horizontal" size={14} align="center">
+            <Tag
+              color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
+              style={{ textTransform: 'capitalize', fontSize: 12.5, padding: '3px 12px', borderRadius: 14, fontWeight: 600 }}
+            >
+              {activeRole}
+            </Tag>
+
+            {/* Notifications Popover */}
+            <Popover content={notificationContent} trigger="click" placement="bottomRight">
+              <Badge count={unreadCount} size="small" offset={[-2, 4]}>
+                <Button type="text" shape="circle" icon={<BellOutlined style={{ fontSize: 19, color: '#475569' }} />} />
+              </Badge>
+            </Popover>
+
+            {user ? (
+              <>
+                {/* User Silhouette Icon */}
+                <Button
+                  type="text"
+                  shape="circle"
+                  icon={<UserOutlined style={{ fontSize: 18, color: '#475569' }} />}
+                  onClick={() => navigate(`/${activeRole}/profile`)}
+                />
+
+                {/* User Avatar Circle */}
+                <Avatar style={{ backgroundColor: '#4F46E5', verticalAlign: 'middle', fontWeight: 600 }} size={38}>
+                  {user.email?.slice(0, 2).toUpperCase() ?? 'U'}
+                </Avatar>
+
+                {/* Account ▾ Dropdown Pill */}
+                <Dropdown menu={{ items: profileMenuItems }} placement="bottomRight">
+                  <button
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: '#FFFFFF',
+                      border: '1px solid #E2E8F0',
+                      borderRadius: 20,
+                      padding: '6px 14px',
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: '#334155',
+                      cursor: 'pointer',
+                      height: 40,
+                    }}
+                  >
+                    <span>Account</span>
+                    <DownOutlined style={{ fontSize: 10, color: '#94A3B8' }} />
+                  </button>
+                </Dropdown>
+              </>
+            ) : (
+              <>
+                <Button type="text" onClick={() => navigate('/login')} style={{ fontSize: 14, fontWeight: 600 }}>Login</Button>
+                <Button type="primary" onClick={() => navigate('/register/customer')} style={{ fontSize: 14, fontWeight: 600, height: 40, borderRadius: 20, padding: '0 20px' }}>Register</Button>
+              </>
+            )}
+          </Space>
+        </Header>
+
+        {/* Page Content Body */}
+        <Content
+          style={{
+            margin: '28px 32px 32px 32px',
+            minHeight: 'calc(100vh - 190px)',
+            background: 'transparent',
+          }}
+        >
+          <Outlet context={{ isBackendHealthy, healthData, checkHealth }} />
+        </Content>
+
+        {/* Light Footer */}
+        <Footer
+          style={{
+            background: '#FFFFFF',
+            borderTop: '1px solid #E2E8F0',
+            textAlign: 'center',
+            padding: '20px 32px',
+            color: '#64748B',
+            fontSize: 14,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <Text strong style={{ color: '#172B4D', fontSize: 14.5 }}>MarketTwin</Text> &mdash; Demand-Driven B2B Marketplace Platform
+            </div>
+            <div style={{ fontSize: 13, color: '#94A3B8' }}>
+              &copy; {new Date().getFullYear()} MarketTwin Inc. All rights reserved.
+            </div>
+          </div>
+        </Footer>
+      </Layout>
+    </Layout>
+  );
+};
+
+export default AppLayout;
