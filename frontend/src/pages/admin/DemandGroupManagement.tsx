@@ -30,6 +30,7 @@ import {
   ClusterOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -39,9 +40,10 @@ export const DemandGroupManagement: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!supabase) return;
-      const { data } = await supabase.from('demand_groups').select('*');
-      setGroups(data ?? []);
+      try {
+        const res = await axiosClient.get('/api/v1/admin/demand-groups');
+        setGroups(res.data.items || []);
+      } catch (e) {}
     };
     load();
   }, []);

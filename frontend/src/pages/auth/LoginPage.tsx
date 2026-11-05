@@ -4,6 +4,7 @@ import { Card, Form, Input, Button, Typography, Alert, Space } from 'antd';
 import { MailOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -19,11 +20,30 @@ const LoginPage: React.FC = () => {
   const onFinish = async (values: { email: string; password: string }) => {
     setLoading(true);
     setError(null);
-    const { error: err } = await signIn(values.email, values.password);
-    if (err) {
-      setLoading(false);
-      setError(err);
-      return;
+
+    if (selectedRole === 'admin') {
+      try {
+        const res = await axiosClient.post('/api/v1/auth/admin/login', {
+          email: values.email,
+          password: values.password,
+        });
+        if (!supabase) throw new Error('Supabase is not configured.');
+        await supabase.auth.setSession({
+          access_token: res.data.access_token,
+          refresh_token: res.data.refresh_token,
+        });
+      } catch (e: any) {
+        setLoading(false);
+        setError(e?.response?.data?.detail || e?.message || 'Invalid admin credentials.');
+        return;
+      }
+    } else {
+      const { error: err } = await signIn(values.email, values.password);
+      if (err) {
+        setLoading(false);
+        setError(err);
+        return;
+      }
     }
 
     if (!supabase) {
@@ -60,7 +80,7 @@ const LoginPage: React.FC = () => {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F5F7FA', padding: 24 }}>
       <Card style={{ width: 440, boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}>
-        <Space direction="vertical" size={4} style={{ width: '100%', marginBottom: 16 }}>
+        <Space orientation="vertical" size={4} style={{ width: '100%', marginBottom: 16 }}>
           <Title level={3} style={{ margin: 0, color: '#172B4D' }}>Sign in to MarketTwin</Title>
           <Text type="secondary">Choose your role and use your Supabase account.</Text>
         </Space>

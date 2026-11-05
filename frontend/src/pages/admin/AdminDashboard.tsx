@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Row,
@@ -36,6 +36,7 @@ import {
   ThunderboltFilled,
 } from '@ant-design/icons';
 import { HealthResponse } from '../../types';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -74,6 +75,17 @@ export const AdminDashboard: React.FC = () => {
   const isBackendHealthy = context?.isBackendHealthy ?? true;
   const checkHealth = context?.checkHealth || (() => {});
   const [syncing, setSyncing] = useState(false);
+  const [overview, setOverview] = useState<any>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await axiosClient.get('/api/v1/admin/dashboard/overview');
+        setOverview(res.data);
+      } catch (e) {}
+    };
+    load();
+  }, []);
 
   // View mode switcher: List View vs Grid View
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -524,7 +536,7 @@ export const AdminDashboard: React.FC = () => {
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 16, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>28</span>
+              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{overview?.total_offers ?? 0}</span>
               <span
                 style={{
                   backgroundColor: '#ECFDF5',
@@ -561,7 +573,7 @@ export const AdminDashboard: React.FC = () => {
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 16, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>5</span>
+              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{overview?.pending_demands ?? 0}</span>
               <span
                 style={{
                   backgroundColor: '#ECFDF5',
@@ -631,7 +643,7 @@ export const AdminDashboard: React.FC = () => {
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 16, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>16</span>
+              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{overview?.completed_orders ?? 0}</span>
             </div>
           </div>
         </Col>

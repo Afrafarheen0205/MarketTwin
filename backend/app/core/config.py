@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", description="Supabase service role secret key")
     SUPABASE_JWT_SECRET: str = Field(default="", description="Supabase JWT secret for token verification")
     FRONTEND_URL: str = Field(default="http://localhost:5173", description="Frontend base URL for auth redirects")
+    ADMIN_EMAIL: str = Field(default="", description="Admin login email")
+    ADMIN_PASSWORD: str = Field(default="", description="Admin login password")
+    GROQ_API_KEY: str = Field(default="", description="Groq API key for AI features")
+    PAYPAL_CLIENT_ID: str = Field(default="", description="PayPal client ID")
+    PAYPAL_CLIENT_SECRET: str = Field(default="", description="PayPal client secret")
+    PAYPAL_MODE: str = Field(default="sandbox", description="PayPal mode: sandbox or live")
 
     @property
     def cors_origins(self) -> List[str]:

@@ -32,7 +32,7 @@ export const MerchantProfile: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 24 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 24 } }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <Avatar size={72} style={{ backgroundColor: '#FAAD14', fontSize: 24 }} icon={<ShopOutlined />} />
           <div>

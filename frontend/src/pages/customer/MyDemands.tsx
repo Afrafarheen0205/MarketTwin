@@ -4,7 +4,8 @@ import { Card, Table, Tag, Progress, Button, Space, Typography, Input, Select, R
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreAddOutlined, SearchOutlined, EyeOutlined, TagsOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { fetchDemands } from '../../services/demandService';
+import demandApi from '../../api/demandApi';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -15,12 +16,26 @@ export const MyDemands: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewingDemand, setViewingDemand] = useState<any | null>(null);
+  const [reqStatus, setReqStatus] = useState<any>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!viewingDemand) { setReqStatus(null); return; }
+      try {
+        const res = await axiosClient.get(`/api/v1/customer/demands/${viewingDemand.id}/requirement-status`);
+        setReqStatus(res.data);
+      } catch {
+        setReqStatus(null);
+      }
+    };
+    load();
+  }, [viewingDemand]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       if (!user) { setLoading(false); return; }
-      try { setDemands(await fetchDemands(user.id)); } finally { setLoading(false); }
+      try { const res = await demandApi.listDemands(); setDemands(res.items || []); } finally { setLoading(false); }
     };
     load();
   }, [user]);
@@ -33,9 +48,9 @@ export const MyDemands: React.FC = () => {
 
   const columns: ColumnsType<any> = [
     { title: 'Demand Code', dataIndex: 'demand_code', key: 'demand_code', render: (code) => <Text strong style={{ color: '#1677FF' }}>{code}</Text> },
-    { title: 'Title & Category', dataIndex: 'title', key: 'title', render: (title, record) => (<div><div style={{ fontWeight: 600 }}>{title}</div><Tag color="blue" style={{ marginTop: 2 }}>{record.category}</Tag></div>) },
-    { title: 'Target Price', dataIndex: 'target_price', key: 'target_price', render: (price, record) => (<div><span style={{ fontWeight: 600, color: '#172B4D' }}>${price}</span><span style={{ fontSize: 11, color: '#8993A4', textDecoration: 'line-through', marginLeft: 6 }}>${record.market_price}</span></div>) },
-    { title: 'Volume', dataIndex: 'target_quantity', key: 'target_quantity', render: (qty) => <span>{qty} units</span> },
+    { title: 'Title & Category', dataIndex: 'product_name', key: 'title', render: (title, record) => (<div><div style={{ fontWeight: 600 }}>{title}</div><Tag color="blue" style={{ marginTop: 2 }}>{record.category}</Tag></div>) },
+    { title: 'Target Price', dataIndex: 'target_unit_price', key: 'target_price', render: (price, record) => (<div><span style={{ fontWeight: 600, color: '#172B4D' }}>${price}</span><span style={{ fontSize: 11, color: '#8993A4', textDecoration: 'line-through', marginLeft: 6 }}>${record.market_price}</span></div>) },
+    { title: 'Volume', dataIndex: 'quantity', key: 'target_quantity', render: (qty) => <span>{qty} units</span> },
     { title: 'Group Progress', key: 'groupProgress', render: (_, record) => { const percent = record.group_threshold ? Math.min(Math.round((record.current_group_quantity / record.group_threshold) * 100), 100) : 0; return (<div style={{ width: 140 }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}><span>{record.current_group_quantity}/{record.group_threshold}</span><span style={{ fontWeight: 600 }}>{percent}%</span></div><Progress percent={percent} size="small" strokeColor="#1677FF" showInfo={false} /></div>); } },
     { title: 'Status', dataIndex: 'status', key: 'status', render: (status) => { let color = 'default'; if (status === 'Grouped') color = 'blue'; if (status === 'Offers Received') color = 'gold'; if (status === 'Approved') color = 'green'; return <Tag color={color}>{status}</Tag>; } },
     { title: 'Offers', dataIndex: 'offers_count', key: 'offers_count', render: (count) => (<Badge count={count ?? 0} showZero style={{ backgroundColor: (count ?? 0) > 0 ? '#1677FF' : '#DFE1E6', color: (count ?? 0) > 0 ? '#FFFFFF' : '#6B778C' }} />) },
@@ -44,20 +59,20 @@ export const MyDemands: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col xs={24} sm={16}><Title level={4} style={{ margin: 0, color: '#172B4D' }}>My Product Demands</Title><Text type="secondary" style={{ fontSize: 13 }}>Track demand aggregation, group volume thresholds, and merchant offer submissions.</Text></Col>
           <Col xs={24} sm={8} style={{ textAlign: 'right' }}><Button type="primary" icon={<AppstoreAddOutlined />} onClick={() => navigate('/customer/demands/create')}>Create New Demand</Button></Col>
         </Row>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 16 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 16 } }}>
         <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12} md={8}><Input placeholder="Search demands by code or title..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} prefix={<SearchOutlined style={{ color: '#8993A4' }} />} allowClear /></Col>
           <Col xs={12} sm={6} md={6}><Select style={{ width: '100%' }} value={statusFilter} onChange={(val) => setStatusFilter(val)} options={[{ label: 'All Statuses', value: 'all' }, { label: 'Pending', value: 'Pending' }, { label: 'Grouped', value: 'Grouped' }, { label: 'Offers Received', value: 'Offers Received' }, { label: 'Approved', value: 'Approved' }]} /></Col>
           <Col xs={12} sm={6} md={10} style={{ textAlign: 'right' }}><Text type="secondary" style={{ fontSize: 13 }}>Total Demands: <strong>{filteredDemands.length}</strong></Text></Col>
         </Row>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 0 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         {filteredDemands.length === 0 ? <Empty description="No data available yet" style={{ padding: 40 }} /> : <Table columns={columns} dataSource={filteredDemands} rowKey="id" pagination={{ pageSize: 6 }} loading={loading} />}
       </Card>
       <Modal title={`Demand Specification: ${viewingDemand?.demand_code}`} open={Boolean(viewingDemand)} onCancel={() => setViewingDemand(null)} footer={[<Button key="close" onClick={() => setViewingDemand(null)}>Close</Button>, <Button key="offers" type="primary" onClick={() => { setViewingDemand(null); navigate('/customer/offers'); }}>View Received Offers</Button>]} width={680}>
@@ -72,6 +87,8 @@ export const MyDemands: React.FC = () => {
           <Descriptions.Item label="Created Date">{viewingDemand.created_at}</Descriptions.Item>
           <Descriptions.Item label="Target Deadline">{viewingDemand.deadline}</Descriptions.Item>
           <Descriptions.Item label="Detailed Specs" span={2}><p style={{ margin: 0, fontSize: 13 }}>{viewingDemand.description}</p></Descriptions.Item>
+          <Descriptions.Item label="Requirement Status" span={2}>{reqStatus?.status || 'Pending'}</Descriptions.Item>
+          {reqStatus?.clarification_questions?.length ? (<Descriptions.Item label="Clarifications" span={2}>{reqStatus.clarification_questions.join('; ')}</Descriptions.Item>) : null}
         </Descriptions>)}
       </Modal>
     </div>

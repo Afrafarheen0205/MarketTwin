@@ -34,11 +34,11 @@ export const Orders: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Title level={4} style={{ margin: 0, color: '#172B4D' }}>My Demand Orders</Title>
         <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Review finalized demand fulfillment orders. Track milestone progression and freight status.</Paragraph>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 0 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         {orders.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#6B778C' }}>No data available yet</div> : <Table columns={columns} dataSource={orders} rowKey="id" pagination={{ pageSize: 6 }} loading={loading} />}
       </Card>
     </div>

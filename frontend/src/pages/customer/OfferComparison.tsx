@@ -23,6 +23,7 @@ import {
   DiffOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -36,9 +37,10 @@ export const OfferComparison: React.FC = () => {
   const [comparisonOffers, setComparisonOffers] = useState<any[]>([]);
   useEffect(() => {
     const load = async () => {
-      if (!supabase) return;
-      const { data } = await supabase.from('merchant_offers').select('*').limit(3);
-      setComparisonOffers(data ?? []);
+      try {
+        const res = await axiosClient.get('/api/v1/customer/offers');
+        setComparisonOffers((res.data.items || []).slice(0, 3));
+      } catch (e) {}
     };
     load();
   }, []);

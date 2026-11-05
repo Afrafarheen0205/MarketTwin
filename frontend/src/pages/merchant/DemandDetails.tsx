@@ -30,7 +30,7 @@ export const DemandDetails: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/merchant/demands')}>Back to Available Demands</Button></div>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 28 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <Space style={{ marginBottom: 8 }}>

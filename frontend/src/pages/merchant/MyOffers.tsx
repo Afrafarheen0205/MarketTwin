@@ -4,7 +4,7 @@ import { Card, Table, Tag, Button, Space, Typography, Modal, InputNumber, messag
 import type { ColumnsType } from 'antd/es/table';
 import { TagsOutlined, EditOutlined, CarOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { fetchOffers } from '../../services/offerService';
+import axiosClient from '../../api/axiosClient';
 import { supabase } from '../../services/supabase';
 
 const { Title, Text, Paragraph } = Typography;
@@ -19,7 +19,7 @@ export const MyOffers: React.FC = () => {
 
   const loadOffers = async () => {
     if (!user) { setLoading(false); return; }
-    try { setOffers(await fetchOffers({ merchantId: user.id })); } finally { setLoading(false); }
+    try { const res = await axiosClient.get('/api/v1/merchant/offers'); setOffers(res.data.items || []); } finally { setLoading(false); }
   };
 
   useEffect(() => { loadOffers(); }, [user]);
@@ -44,11 +44,11 @@ export const MyOffers: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Title level={4} style={{ margin: 0, color: '#172B4D' }}>My Submitted Offers</Title>
         <Text type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13, display: 'block' }}>Track your active bids, revise pricing, and manage approved contracts awaiting fulfillment.</Text>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 0 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         {offers.length === 0 ? <Empty description="No data available yet" style={{ padding: 40 }} /> : <Table columns={columns} dataSource={offers} rowKey="id" pagination={{ pageSize: 6 }} loading={loading} />}
       </Card>
       <Modal title={`Revise Offer: ${revisingOffer?.offer_code}`} open={Boolean(revisingOffer)} onCancel={() => setRevisingOffer(null)} onOk={handleRevise} okText="Update Bid">

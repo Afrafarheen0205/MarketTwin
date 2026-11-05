@@ -31,7 +31,7 @@ export const NotificationsPage: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Notifications & Demand Alerts</Title>
@@ -40,7 +40,7 @@ export const NotificationsPage: React.FC = () => {
           <Button icon={<CheckOutlined />} onClick={markAllRead}>Mark All as Read</Button>
         </div>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 16 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 16 } }}>
         <Tabs activeKey={filterType} onChange={(key) => setFilterType(key)} items={[{ key: 'all', label: `All Alerts (${items.length})` }, { key: 'offer', label: 'Merchant Offers' }, { key: 'demand', label: 'Demand Groups' }, { key: 'order', label: 'Order Tracking' }]} />
         {filteredItems.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#6B778C' }}>No data available yet</div> : (
           <List itemLayout="horizontal" dataSource={filteredItems} renderItem={(item) => (

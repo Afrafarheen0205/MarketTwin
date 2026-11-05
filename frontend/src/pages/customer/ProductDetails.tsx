@@ -120,7 +120,7 @@ export const ProductDetails: React.FC = () => {
       />
 
       {/* Main Details Card */}
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: 32 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: 32 } }}>
         <Row gutter={[36, 36]}>
           {/* Left Column: Image Gallery */}
           <Col xs={24} md={10}>
