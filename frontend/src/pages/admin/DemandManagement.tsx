@@ -27,6 +27,7 @@ import {
   CheckCircleOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -162,24 +163,46 @@ export const DemandManagement: React.FC = () => {
       key: 'action',
       align: 'right',
       render: (_, record) => (
-        <button
-          onClick={() => setViewingDemand(record)}
-          style={{
-            backgroundColor: '#0A101D',
-            color: '#FFFFFF',
-            border: 'none',
-            borderRadius: 18,
-            padding: '5px 14px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'background 0.2s',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1E293B')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#0A101D')}
-        >
-          Audit Demand
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setViewingDemand(record)}
+            style={{
+              backgroundColor: '#0A101D',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: 18,
+              padding: '5px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 0.2s',
+            }}
+          >
+            Audit Demand
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await axiosClient.post(`/api/v1/admin/demands/${record.id}/extract-requirements`);
+                alert('Requirements extracted');
+              } catch (e: any) {
+                alert(e?.response?.data?.detail || 'Extraction failed');
+              }
+            }}
+            style={{
+              backgroundColor: '#FFFFFF',
+              color: '#0F172A',
+              border: '1px solid #CBD5E1',
+              borderRadius: 18,
+              padding: '5px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Extract
+          </button>
+        </div>
       ),
     },
   ];

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, Table, Tag, Button, Space, Typography, Input, Select, Row, Col, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { SearchOutlined, ThunderboltOutlined, FileAddOutlined, EyeOutlined } from '@ant-design/icons';
-import { fetchDemandGroups } from '../../services/demandService';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -15,7 +15,12 @@ export const AvailableDemands: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const load = async () => { try { setGroups(await fetchDemandGroups()); } finally { setLoading(false); } };
+    const load = async () => {
+      try {
+        const res = await axiosClient.get('/api/v1/merchant/demand-groups');
+        setGroups(res.data.items || []);
+      } finally { setLoading(false); }
+    };
     load();
   }, []);
 
@@ -37,18 +42,18 @@ export const AvailableDemands: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Available Customer Demand Pools</Title>
         <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Verified buyer groups with aggregated purchasing power. Submit competitive proposals detailing your wholesale pricing, logistics lead times, and warranty terms.</Paragraph>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 16 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 16 } }}>
         <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12} md={8}><Input placeholder="Search demand pools..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} prefix={<SearchOutlined style={{ color: '#8993A4' }} />} allowClear /></Col>
           <Col xs={12} sm={6} md={6}><Select style={{ width: '100%' }} value={categoryFilter} onChange={(val) => setCategoryFilter(val)} options={[{ label: 'All Categories', value: 'all' }, { label: 'Office Furniture', value: 'Office Furniture' }, { label: 'Renewable Energy', value: 'Renewable Energy' }, { label: 'Commercial Kitchen', value: 'Commercial Kitchen' }, { label: 'Food & Beverage', value: 'Food & Beverage' }]} /></Col>
           <Col xs={12} sm={6} md={10} style={{ textAlign: 'right' }}><Text type="secondary" style={{ fontSize: 13 }}>Available Demand Pools: <strong>{filtered.length}</strong></Text></Col>
         </Row>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 0 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         {filtered.length === 0 ? <Empty description="No data available yet" style={{ padding: 40 }} /> : <Table columns={columns} dataSource={filtered} rowKey="id" pagination={{ pageSize: 6 }} loading={loading} />}
       </Card>
     </div>

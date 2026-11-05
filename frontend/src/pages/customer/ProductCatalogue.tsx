@@ -98,7 +98,7 @@ export const ProductCatalogue: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* 1. Header Hero Card */}
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: '22px 28px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: '22px 28px' } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col xs={24} md={15}>
             <Title level={4} style={{ margin: 0, color: '#172B4D', fontWeight: 700 }}>
@@ -123,7 +123,7 @@ export const ProductCatalogue: React.FC = () => {
       </Card>
 
       {/* 2. Interactive Search & Multi-Filter Bar */}
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: '18px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: '18px 24px' } }}>
         <Row gutter={[16, 16]} align="middle">
           {/* Keyword Search */}
           <Col xs={24} sm={12} md={7}>
@@ -332,11 +332,13 @@ export const ProductCatalogue: React.FC = () => {
                         )}
                       </div>
                     }
-                    bodyStyle={{
-                      padding: '16px 18px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      flex: 1,
+                    styles={{
+                      body: {
+                        padding: '16px 18px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        flex: 1,
+                      },
                     }}
                   >
                     {/* Category & Brand */}

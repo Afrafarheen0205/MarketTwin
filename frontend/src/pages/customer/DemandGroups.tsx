@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Row, Col, Card, Progress, Tag, Button, Typography, Space, Statistic, Modal, InputNumber, message } from 'antd';
 import { TeamOutlined, DollarOutlined, ClockCircleOutlined, UsergroupAddOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { fetchDemandGroups } from '../../services/demandService';
+import axiosClient from '../../api/axiosClient';
 import { supabase } from '../../services/supabase';
 
 const { Title, Text, Paragraph } = Typography;
@@ -17,7 +17,10 @@ export const DemandGroups: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const loadGroups = async () => {
-    try { setGroups(await fetchDemandGroups()); } finally { setLoading(false); }
+    try {
+      const res = await axiosClient.get('/api/v1/customer/groups');
+      setGroups(res.data.items || []);
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { loadGroups(); }, []);
@@ -33,7 +36,7 @@ export const DemandGroups: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Row justify="space-between" align="middle">
           <Col xs={24} md={16}><Title level={4} style={{ margin: 0, color: '#172B4D' }}>Demand Aggregation Groups</Title><Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Buyers with compatible product requirements are pooled together. As aggregate quantity reaches volume thresholds, merchants submit deeper discounts.</Paragraph></Col>
           <Col xs={24} md={8} style={{ textAlign: 'right' }}><Button type="primary" icon={<ThunderboltOutlined />} onClick={() => navigate('/customer/demands/create')}>Start New Group Demand</Button></Col>
@@ -46,7 +49,7 @@ export const DemandGroups: React.FC = () => {
             const isThresholdMet = group.total_quantity >= group.threshold_quantity;
             return (
               <Col xs={24} md={12} key={group.id}>
-                <Card style={{ background: '#FFFFFF', borderColor: isThresholdMet ? '#B7EB8F' : '#EBECF0', borderRadius: 8 }} hoverable bodyStyle={{ padding: 22 }}>
+                <Card style={{ background: '#FFFFFF', borderColor: isThresholdMet ? '#B7EB8F' : '#EBECF0', borderRadius: 8 }} hoverable styles={{ body: { padding: 22 } }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <Space><Tag color="blue" style={{ fontSize: 12, padding: '2px 8px', fontWeight: 600 }}>{group.group_code}</Tag><Tag color="cyan">{group.category}</Tag></Space>
                     <Tag color={isThresholdMet ? 'green' : 'gold'}>{isThresholdMet ? 'Threshold Unlocked' : group.status}</Tag>

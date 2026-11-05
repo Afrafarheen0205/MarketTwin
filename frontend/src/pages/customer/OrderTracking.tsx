@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Steps, Typography, Descriptions, Tag, Button, Row, Col, Timeline, Divider } from 'antd';
 import { ArrowLeftOutlined, CheckCircleOutlined, ClockCircleOutlined, CarOutlined, ShopOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text } = Typography;
 
@@ -14,9 +15,11 @@ export const OrderTracking: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!supabase || !id) { setLoading(false); return; }
-      const { data } = await supabase.from('orders').select('*').eq('id', id).single();
-      setOrder(data);
+      if (!id) { setLoading(false); return; }
+      try {
+        const res = await axiosClient.get(`/api/v1/customer/orders/${id}/tracking`);
+        setOrder(res.data.order);
+      } catch (e) {}
       setLoading(false);
     };
     load();
@@ -28,7 +31,7 @@ export const OrderTracking: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/customer/orders')}>Back to Orders</Button></div>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 28 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
             <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Tracking Order: {order.order_number}</Title>

@@ -4,6 +4,7 @@ import { Card, Steps, Form, Input, InputNumber, Select, DatePicker, Button, Row,
 import { AppstoreAddOutlined, DollarOutlined, TeamOutlined, CheckCircleOutlined, ThunderboltOutlined, ArrowLeftOutlined, ArrowRightOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
+import demandApi from '../../api/demandApi';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -33,29 +34,29 @@ export const CreateDemand: React.FC = () => {
         if (!supabase || !user) { return; }
         setLoading(true);
         const payload = {
-          demand_code: `DEM-${Date.now()}`,
-          customer_id: user.id,
-          title: values.title,
+          product_name: values.title,
           category: values.category,
-          target_price: values.targetPrice,
-          market_price: Math.round(values.targetPrice * 1.35),
-          target_quantity: values.targetQuantity,
-          current_group_quantity: values.targetQuantity,
-          group_threshold: Math.max(values.targetQuantity * 3, 10),
-          status: 'Pending',
           description: values.description,
-          specs: {
-            'Quality Tier': values.qualityTier || 'Commercial / Enterprise',
-            'Shipping Preference': values.shippingTerms || 'Doorstep Delivery',
-            'Target Lead Time': `${values.leadTimeWeeks || 2} Weeks`,
-          },
-          deadline: values.deadline ? values.deadline.format('YYYY-MM-DD') : '2026-12-01',
+          quantity: values.targetQuantity,
+          unit: 'units',
+          target_unit_price: values.targetPrice,
+          maximum_budget: values.targetQuantity * values.targetPrice,
+          currency: 'USD',
+          required_delivery_date: values.deadline ? values.deadline.format('YYYY-MM-DD') : null,
+          expected_lead_time: values.leadTimeWeeks || 2,
+          delivery_address: { shipping_terms: values.shippingTerms },
+          additional_requirements: values.description,
         };
-        const { data, error } = await supabase.from('demands').insert(payload).select().single();
-        setLoading(false);
-        if (error) { return; }
-        setCreatedDemand(data);
-        setSubmitted(true);
+        try {
+          const data = await demandApi.createDemand(payload);
+          setCreatedDemand(data);
+          setSubmitted(true);
+        } catch (e) {
+          // ignore
+        } finally {
+          setLoading(false);
+        }
+        return;
       }
     } catch {
       // validation error
@@ -83,11 +84,11 @@ export const CreateDemand: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Create Product Demand</Title>
         <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Specify what you need. When similar demands are detected, MarketTwin groups buyers to attract competitive volume offers from certified merchants.</Paragraph>
       </Card>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 28 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
         <Steps current={currentStep} style={{ marginBottom: 32 }} items={[{ title: 'Product Specification', icon: <AppstoreAddOutlined /> }, { title: 'Volume & Budget', icon: <DollarOutlined /> }, { title: 'Grouping & Review', icon: <TeamOutlined /> }]} />
         <Form form={form} layout="vertical" initialValues={{ title: initialProduct, category: initialCategory, targetQuantity: 5, targetPrice: initialPrice, description: initialDesc, qualityTier: 'Commercial / Enterprise', shippingTerms: 'Doorstep Delivery', leadTimeWeeks: 2, autoGroup: true }}>
           {currentStep === 0 && (<div>

@@ -37,10 +37,10 @@ export const MerchantDashboard: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: 'linear-gradient(135deg, #FFFFFF 0%, #FFFBE6 100%)', borderColor: '#FFE58F', boxShadow: '0 2px 8px rgba(250, 173, 20, 0.08)' }} bodyStyle={{ padding: '24px 28px' }}>
+      <Card style={{ background: 'linear-gradient(135deg, #FFFFFF 0%, #FFFBE6 100%)', borderColor: '#FFE58F', boxShadow: '0 2px 8px rgba(250, 173, 20, 0.08)' }} styles={{ body: { padding: '24px 28px' } }}>
         <Row align="middle" justify="space-between" gutter={[16, 16]}>
           <Col xs={24} md={16}>
-            <Space direction="vertical" size={4}>
+            <Space orientation="vertical" size={4}>
               <Tag color="orange" icon={<ShopOutlined />} style={{ fontWeight: 600 }}>MERCHANT SUPPLY PORTAL &bull; DEMAND BIDDING</Tag>
               <Title level={3} style={{ margin: 0, color: '#172B4D' }}>Welcome, Merchant</Title>
               <Paragraph type="secondary" style={{ margin: 0, fontSize: 14 }}>Access pre-aggregated customer demand pools. Submit competitive offers to win high-volume bulk supply contracts.</Paragraph>
@@ -52,12 +52,12 @@ export const MerchantDashboard: React.FC = () => {
         </Row>
       </Card>
       <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} lg={6}><Card bordered hoverable bodyStyle={{ padding: 20 }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Submitted Offers</Text>} value={offers.length} prefix={<TagsOutlined style={{ color: '#1677FF', marginRight: 6 }} />} valueStyle={{ fontWeight: 700, color: '#172B4D' }} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card bordered hoverable bodyStyle={{ padding: 20 }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Open Demand Pools</Text>} value={groups.length} prefix={<TeamOutlined style={{ color: '#FAAD14', marginRight: 6 }} />} valueStyle={{ fontWeight: 700, color: '#172B4D' }} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card bordered hoverable bodyStyle={{ padding: 20 }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Fulfillment Orders</Text>} value={orders.length} prefix={<FileDoneOutlined style={{ color: '#722ED1', marginRight: 6 }} />} valueStyle={{ fontWeight: 700, color: '#172B4D' }} /></Card></Col>
-        <Col xs={24} sm={12} lg={6}><Card bordered hoverable bodyStyle={{ padding: 20 }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Trust Score</Text>} value={4.9} suffix="/ 5.0" prefix={<CheckCircleOutlined style={{ color: '#52C41A', marginRight: 6 }} />} valueStyle={{ fontWeight: 700, color: '#172B4D' }} /></Card></Col>
+        <Col xs={24} sm={12} lg={6}><Card variant="outlined" hoverable styles={{ body: { padding: 20 } }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Submitted Offers</Text>} value={offers.length} prefix={<TagsOutlined style={{ color: '#1677FF', marginRight: 6 }} />} styles={{ content: { fontWeight: 700, color: '#172B4D' } }} /></Card></Col>
+        <Col xs={24} sm={12} lg={6}><Card variant="outlined" hoverable styles={{ body: { padding: 20 } }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Open Demand Pools</Text>} value={groups.length} prefix={<TeamOutlined style={{ color: '#FAAD14', marginRight: 6 }} />} styles={{ content: { fontWeight: 700, color: '#172B4D' } }} /></Card></Col>
+        <Col xs={24} sm={12} lg={6}><Card variant="outlined" hoverable styles={{ body: { padding: 20 } }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Fulfillment Orders</Text>} value={orders.length} prefix={<FileDoneOutlined style={{ color: '#722ED1', marginRight: 6 }} />} styles={{ content: { fontWeight: 700, color: '#172B4D' } }} /></Card></Col>
+        <Col xs={24} sm={12} lg={6}><Card variant="outlined" hoverable styles={{ body: { padding: 20 } }}><Statistic title={<Text type="secondary" style={{ fontSize: 13 }}>Trust Score</Text>} value={4.9} suffix="/ 5.0" prefix={<CheckCircleOutlined style={{ color: '#52C41A', marginRight: 6 }} />} styles={{ content: { fontWeight: 700, color: '#172B4D' } }} /></Card></Col>
       </Row>
-      <Card title={<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><Space><TeamOutlined style={{ color: '#1677FF' }} /><span style={{ fontSize: 16, fontWeight: 600 }}>Active Customer Demand Pools Ready for Bids</span></Space><Button type="link" size="small" onClick={() => navigate('/merchant/demands')}>View All Open Demands <ArrowRightOutlined /></Button></div>} bordered>
+      <Card title={<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><Space><TeamOutlined style={{ color: '#1677FF' }} /><span style={{ fontSize: 16, fontWeight: 600 }}>Active Customer Demand Pools Ready for Bids</span></Space><Button type="link" size="small" onClick={() => navigate('/merchant/demands')}>View All Open Demands <ArrowRightOutlined /></Button></div>} variant="outlined">
         {groups.length === 0 ? <div style={{ padding: 24, textAlign: 'center', color: '#6B778C' }}>No data available yet</div> : <Table columns={columns} dataSource={groups} rowKey="id" pagination={false} size="middle" />}
       </Card>
     </div>

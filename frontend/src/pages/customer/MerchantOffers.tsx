@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { fetchOffers } from '../../services/offerService';
 import { createOrder } from '../../services/orderService';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -19,9 +20,8 @@ export const MerchantOffers: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const loadOffers = async () => {
-    try { setOffers(await fetchOffers()); } finally { setLoading(false); }
+    try { const res = await axiosClient.get('/api/v1/customer/offers'); setOffers(res.data.items || []); } finally { setLoading(false); }
   };
-
   useEffect(() => { loadOffers(); }, []);
 
   const handleApprove = async () => {
@@ -57,14 +57,14 @@ export const MerchantOffers: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col xs={24} md={16}><Title level={4} style={{ margin: 0, color: '#172B4D' }}>Competitive Merchant Offers</Title><Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Compare eligible merchant proposals. Purchases are finalized only after explicit buyer approval.</Paragraph></Col>
           <Col xs={24} md={8} style={{ textAlign: 'right' }}><Button type="primary" icon={<DiffOutlined />} size="large" onClick={() => navigate('/customer/compare')}>Open Offer Comparison Matrix</Button></Col>
         </Row>
       </Card>
       <Alert message="Buyer Protection & Explicit Approval Gating" description="Merchants submit bids to your demand pools. You are under no obligation to buy until you explicitly review and approve a proposal." type="success" showIcon icon={<SafetyCertificateOutlined style={{ color: '#52C41A' }} />} style={{ background: '#F6FFED', borderColor: '#B7EB8F' }} />
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 0 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         {offers.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#6B778C' }}>No data available yet</div> : <Table columns={columns} dataSource={offers} rowKey="id" pagination={{ pageSize: 6 }} loading={loading} />}
       </Card>
       <Modal title={<Space><SafetyCertificateOutlined style={{ color: '#1677FF' }} /><span>Explicit Customer Approval Confirmation</span></Space>} open={Boolean(approvingOffer)} onCancel={() => { setApprovingOffer(null); setExplicitConsent(false); }} onOk={handleApprove} okText="Confirm & Approve Final Offer" okButtonProps={{ disabled: !explicitConsent, type: 'primary' }} width={650}>

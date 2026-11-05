@@ -113,6 +113,10 @@ export const router = createBrowserRouter([
   { path: '/auth/verify-email', element: <VerifyEmailPage /> },
   { path: '/auth/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/auth/reset-password', element: <ResetPasswordPage /> },
-]);
+], {
+  future: {
+    v7_relativeSplatPath: true,
+  },
+});
 
 export default router;

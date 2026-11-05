@@ -205,7 +205,7 @@ export const ProductSearch: React.FC = () => {
       title: 'Match Type',
       key: 'match_type',
       render: (_: any, r: ProductMatchItem) => (
-        <Space direction="vertical" size={2}>
+        <Space orientation="vertical" size={2}>
           {r.match_type === 'exact' ? (
             <Tag color="success" icon={<CheckCircleOutlined />} style={{ borderRadius: 12, fontWeight: 700 }}>
               Exact Match
@@ -296,7 +296,7 @@ export const ProductSearch: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* 1. Header Hero Card */}
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: '24px 28px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: '24px 28px' } }}>
         <Row justify="space-between" align="middle" gutter={[16, 16]}>
           <Col xs={24} md={16}>
             <Title level={4} style={{ margin: 0, color: '#172B4D', fontWeight: 700 }}>
@@ -321,7 +321,7 @@ export const ProductSearch: React.FC = () => {
       </Card>
 
       {/* 2. Interactive Search & Debounced Input Bar */}
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: '20px 24px' }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: '20px 24px' } }}>
         <Row gutter={[16, 16]} align="middle">
           {/* Main Search Input */}
           <Col xs={24}>
@@ -600,11 +600,13 @@ export const ProductSearch: React.FC = () => {
                           </div>
                         </div>
                       }
-                      bodyStyle={{
-                        padding: '16px 18px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        flex: 1,
+                      styles={{
+                        body: {
+                          padding: '16px 18px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1,
+                        },
                       }}
                     >
                       {/* Sector & Brand */}
@@ -736,7 +738,7 @@ export const ProductSearch: React.FC = () => {
             </div>
           </>
         ) : (
-          <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} bodyStyle={{ padding: 0 }}>
+          <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', borderRadius: 10 }} styles={{ body: { padding: 0 } }}>
             <Table<ProductMatchItem>
               columns={columns}
               dataSource={displayedItems}

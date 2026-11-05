@@ -4,6 +4,7 @@ import { Card, Form, Input, InputNumber, Select, Button, Row, Col, Typography, A
 import { FileAddOutlined, DollarOutlined, CarOutlined, CheckCircleOutlined, ThunderboltOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
+import axiosClient from '../../api/axiosClient';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -42,27 +43,42 @@ export const SubmitOffer: React.FC = () => {
     if (!supabase || !user || !group) return;
     setLoading(true);
     const payload = {
-      offer_code: `OFF-${Date.now()}`,
-      demand_id: null,
-      demand_title: group.product_title,
-      merchant_id: user.id,
+      offered_product_name: group.product_title,
+      brand: null,
+      model_number: null,
+      description: values.specNotes,
+      material: null,
+      material_grade: null,
+      specifications: {},
+      certifications: [],
+      compliance_notes: values.specNotes,
+      offered_unit_price: values.unitPrice,
+      currency: 'USD',
+      tax_amount: 0,
+      additional_charges: 0,
+      shipping_cost: 0,
+      final_quoted_amount: values.unitPrice * group.total_quantity,
+      minimum_order_quantity: values.minOrderQuantity,
+      available_quantity: group.total_quantity,
+      production_lead_time: values.deliveryDays,
+      dispatch_lead_time: values.deliveryDays,
+      delivery_lead_time: values.deliveryDays,
+      delivery_terms: values.shippingTerms,
+      offer_valid_until: null,
+      merchant_remarks: values.specNotes,
       merchant_name: user.user_metadata?.company || user.email,
       merchant_rating: 4.9,
-      unit_price: values.unitPrice,
-      original_target_price: group.lowest_offer_price || 210,
-      total_offer_amount: values.unitPrice * group.total_quantity,
-      min_order_quantity: values.minOrderQuantity,
-      delivery_days: values.deliveryDays,
-      warranty_months: values.warrantyMonths,
-      status: 'Submitted',
-      spec_notes: values.specNotes,
-      shipping_terms: values.shippingTerms,
     };
-    const { data, error } = await supabase.from('merchant_offers').insert(payload).select().single();
-    setLoading(false);
-    if (error) return;
-    setCreatedOffer(data);
-    setSubmitted(true);
+    try {
+      const data = await axiosClient.post(`/api/v1/merchant/demand-groups/${group.id}/offers`, payload);
+      setCreatedOffer(data.data);
+      setSubmitted(true);
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+    return;
   };
 
   if (submitted) {
@@ -74,7 +90,7 @@ export const SubmitOffer: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div><Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/merchant/demands')}>Back to Demands</Button></div>
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 28 }}>
+      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
         <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Submit Competitive Offer for {group.product_title}</Title>
         <Text type="secondary" style={{ fontSize: 13 }}>Targeting Demand Pool: <strong>{group.group_code}</strong> ({group.total_quantity} units committed)</Text>
         <Divider style={{ margin: '18px 0' }} />

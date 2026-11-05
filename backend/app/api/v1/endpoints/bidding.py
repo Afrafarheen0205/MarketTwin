@@ -1,0 +1,81 @@
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.core.security import get_current_user, require_roles
+from app.schemas.bidding import OfferSubmitRequest, OpenBiddingRequest
+from app.services.bidding_service import (
+    close_bidding,
+    get_group,
+    list_merchant_offers,
+    list_open_groups,
+    merchant_is_approved,
+    open_bidding,
+    submit_offer,
+)
+
+logger = logging.getLogger("markettwin.api.bidding")
+router = APIRouter()
+
+
+@router.get("/merchant/demand-groups")
+async def merchant_demand_groups(current_user=Depends(require_roles("merchant"))):
+    if not merchant_is_approved(current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
+    return {"items": list_open_groups()}
+
+
+@router.get("/merchant/demand-groups/{group_id}")
+async def merchant_demand_group_detail(group_id: str, current_user=Depends(require_roles("merchant"))):
+    if not merchant_is_approved(current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
+    group = get_group(group_id)
+    if not group or group.get("bidding_status") != "open":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bidding opportunity not found.")
+    return {"group": group}
+
+
+@router.post("/merchant/demand-groups/{group_id}/offers", status_code=status.HTTP_201_CREATED)
+async def merchant_submit_offer(group_id: str, payload: OfferSubmitRequest, current_user=Depends(require_roles("merchant"))):
+    if not merchant_is_approved(current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
+    try:
+        offer = submit_offer(current_user["id"], group_id, payload.model_dump())
+        return offer
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Offer submission failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.get("/merchant/offers")
+async def merchant_offers(current_user=Depends(require_roles("merchant"))):
+    if not merchant_is_approved(current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
+    return {"items": list_merchant_offers(current_user["id"])}
+
+
+@router.post("/admin/demand-groups/{group_id}/open-bidding")
+async def admin_open_bidding(group_id: str, payload: OpenBiddingRequest, current_user=Depends(require_roles("admin"))):
+    try:
+        group = open_bidding(group_id, payload.start, payload.deadline, current_user["id"])
+        return group
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Open bidding failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/admin/demand-groups/{group_id}/close-bidding")
+async def admin_close_bidding(group_id: str, current_user=Depends(require_roles("admin"))):
+    try:
+        group = close_bidding(group_id, current_user["id"])
+        return group
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Close bidding failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
