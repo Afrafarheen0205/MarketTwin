@@ -1,16 +1,21 @@
+import os
 from functools import lru_cache
 from typing import List, Union
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Determine base directory containing .env
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ENV_FILE_PATH = os.path.join(_BACKEND_DIR, ".env")
+
 
 class Settings(BaseSettings):
     """
     Application Settings configuration via Pydantic BaseSettings.
-    Loads values from environment variables or .env file.
+    Loads values from environment variables or backend/.env file.
     """
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_ENV_FILE_PATH, ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"

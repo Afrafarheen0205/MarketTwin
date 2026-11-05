@@ -35,14 +35,23 @@ const { Title, Text } = Typography;
 
 export const DemandGroupManagement: React.FC = () => {
   const navigate = useNavigate();
-  const [groups, setGroups] = useState<DemandGroupItem[]>(mockDemandGroups);
+  const [groups, setGroups] = useState<any[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!supabase) return;
+      const { data } = await supabase.from('demand_groups').select('*');
+      setGroups(data ?? []);
+    };
+    load();
+  }, []);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [timeRange, setTimeRange] = useState('Today');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
-  const [viewingGroup, setViewingGroup] = useState<DemandGroupItem | null>(null);
+  const [viewingGroup, setViewingGroup] = useState<any | null>(null);
 
   const handleSync = () => {
     setSyncing(true);
@@ -62,7 +71,7 @@ export const DemandGroupManagement: React.FC = () => {
     return matchesSearch && matchesStatus && matchesCat;
   });
 
-  const columns: ColumnsType<DemandGroupItem> = [
+  const columns: ColumnsType<any> = [
     {
       title: 'Group Reference',
       dataIndex: 'groupCode',

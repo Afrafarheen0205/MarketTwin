@@ -12,7 +12,10 @@ export const CreateDemand: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const initialProduct = searchParams.get('product') || searchParams.get('search') || '';
+  const initialProduct = searchParams.get('product') || searchParams.get('search') || searchParams.get('q') || '';
+  const initialCategory = searchParams.get('category') || 'Industrial Equipment';
+  const initialPrice = Number(searchParams.get('price')) || 200;
+  const initialDesc = searchParams.get('desc') || searchParams.get('description') || (initialProduct ? `Custom specifications and quality requirements for ${initialProduct}` : '');
 
   const [currentStep, setCurrentStep] = useState(0);
   const [form] = Form.useForm();
@@ -86,7 +89,7 @@ export const CreateDemand: React.FC = () => {
       </Card>
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} bodyStyle={{ padding: 28 }}>
         <Steps current={currentStep} style={{ marginBottom: 32 }} items={[{ title: 'Product Specification', icon: <AppstoreAddOutlined /> }, { title: 'Volume & Budget', icon: <DollarOutlined /> }, { title: 'Grouping & Review', icon: <TeamOutlined /> }]} />
-        <Form form={form} layout="vertical" initialValues={{ title: initialProduct, category: 'Office Furniture', targetQuantity: 5, targetPrice: 200, qualityTier: 'Commercial / Enterprise', shippingTerms: 'Doorstep Delivery', leadTimeWeeks: 2, autoGroup: true }}>
+        <Form form={form} layout="vertical" initialValues={{ title: initialProduct, category: initialCategory, targetQuantity: 5, targetPrice: initialPrice, description: initialDesc, qualityTier: 'Commercial / Enterprise', shippingTerms: 'Doorstep Delivery', leadTimeWeeks: 2, autoGroup: true }}>
           {currentStep === 0 && (<div>
             <Alert message="Specification Precision" description="Provide clear technical specifications and required certifications to help merchants evaluate manufacturing or wholesale feasibility." type="info" showIcon style={{ marginBottom: 20, background: '#F0F7FF', borderColor: '#BAE0FF' }} />
             <Row gutter={16}>
