@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { env } from '../config/env';
+import { supabase } from '../services/supabase';
 
 /**
  * Configured Axios Client
@@ -16,9 +17,22 @@ export const axiosClient = axios.create({
 
 // Request Interceptor
 axiosClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     // Attach client request timestamp for latency debugging
     config.headers['X-Request-Timestamp'] = new Date().toISOString();
+
+    // Attach active Supabase JWT bearer token if available
+    try {
+      if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) {
+          config.headers.Authorization = `Bearer ${data.session.access_token}`;
+        }
+      }
+    } catch {
+      // Fallback silently if session retrieval fails
+    }
+
     return config;
   },
   (error: AxiosError) => {

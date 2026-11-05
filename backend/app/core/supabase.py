@@ -7,12 +7,20 @@ logger = logging.getLogger("markettwin.supabase")
 _supabase_client = None
 
 
-def get_supabase_client():
+def reset_supabase_client():
+    """Reset cached Supabase client so a fresh HTTP connection pool is created."""
+    global _supabase_client
+    _supabase_client = None
+
+
+def get_supabase_client(force_new: bool = False):
     """
     Returns an initialized Supabase client, or None if credentials are missing/placeholder.
     Gracefully handles absence of credentials during development / Phase 1.
     """
     global _supabase_client
+    if force_new:
+        _supabase_client = None
     if _supabase_client is not None:
         return _supabase_client
 

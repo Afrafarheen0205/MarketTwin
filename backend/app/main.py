@@ -66,8 +66,10 @@ def create_application() -> FastAPI:
     application.add_exception_handler(StarletteHTTPException, http_exception_handler)
     application.add_exception_handler(Exception, generic_exception_handler)
 
-    # Register API Routers
+    # Register API Routers (both /api/v1 and /api for direct endpoint compatibility)
     application.include_router(api_router, prefix=settings.API_V1_STR)
+    if settings.API_V1_STR != "/api":
+        application.include_router(api_router, prefix="/api")
 
     # Direct Health Check Alias at root /health
     @application.get("/health", include_in_schema=True, tags=["Health & System Diagnostics"])

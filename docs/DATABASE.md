@@ -128,3 +128,14 @@ Reusable service modules:
 - `frontend/src/services/demandService.ts`
 
 Existing UI pages are preserved; mock data remains until each module is migrated to live queries.
+
+## Email Configuration (Supabase Auth)
+
+To avoid the default Supabase email rate limit, configure a custom SMTP provider in the Supabase Dashboard:
+
+1. Go to **Authentication -> SMTP Settings** in your Supabase project.
+2. Enable **Custom SMTP**.
+3. Enter your SMTP host, port, username, password, and sender email.
+4. Save and test email delivery.
+
+Store SMTP credentials only in Supabase Dashboard or backend environment variables. Never expose them in frontend code.

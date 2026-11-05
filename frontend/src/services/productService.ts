@@ -1,33 +1,22 @@
-import { supabase } from './supabase';
+import { productApi, Product } from '../api/productApi';
 
-export interface ProductRecord {
-  id: string;
-  name: string;
-  category: string;
-  sku: string;
-  description: string | null;
-  market_price: number;
-  min_demand_price: number | null;
-  rating: number;
-  reviews_count: number;
-  in_stock: boolean;
-  image_url: string | null;
-  specs: Record<string, string>;
-}
+export type ProductRecord = Product;
 
 export const fetchProducts = async (): Promise<ProductRecord[]> => {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as ProductRecord[];
+  try {
+    const res = await productApi.getProducts({ page: 1, page_size: 100 });
+    return res.items;
+  } catch (err) {
+    console.error('Failed to fetch products via API:', err);
+    return [];
+  }
 };
 
-export const fetchCategories = async () => {
-  if (!supabase) return [];
-  const { data, error } = await supabase.from('categories').select('*').order('name');
-  if (error) throw error;
-  return data ?? [];
+export const fetchCategories = async (): Promise<string[]> => {
+  try {
+    return await productApi.getCategories();
+  } catch (err) {
+    console.error('Failed to fetch categories via API:', err);
+    return [];
+  }
 };

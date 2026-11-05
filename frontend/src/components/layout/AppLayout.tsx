@@ -11,7 +11,6 @@ import {
   Tag,
   Typography,
   Tooltip,
-  Breadcrumb,
   Popover,
   List,
   Segmented,
@@ -64,6 +63,7 @@ export const AppLayout: React.FC = () => {
 
   const { user, role: authRole, signOut } = useAuth();
   const currentPath = location.pathname;
+  const isHomePage = currentPath === '/';
   const activeRole: ActiveRole = authRole === 'merchant' ? 'merchant' : authRole === 'admin' ? 'admin' : 'customer';
 
   const [collapsed, setCollapsed] = useState(false);
@@ -228,20 +228,6 @@ export const AppLayout: React.FC = () => {
   // Selected key helper
   const selectedKeys = [location.pathname];
 
-  // Generate breadcrumb items
-  const pathSnippets = location.pathname.split('/').filter((i) => i);
-  const breadcrumbItems = [
-    {
-      title: <Link to="/">Home</Link>,
-    },
-    ...pathSnippets.map((snippet, index) => {
-      const url = `/${pathSnippets.slice(0, index + 1).join('/')}`;
-      const title = snippet.charAt(0).toUpperCase() + snippet.slice(1).replace('-', ' ');
-      return {
-        title: index === pathSnippets.length - 1 ? <span>{title}</span> : <Link to={url}>{title}</Link>,
-      };
-    }),
-  ];
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
@@ -338,7 +324,7 @@ export const AppLayout: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: '#F5F7FA' }}>
       {/* Sider Navigation */}
-      {user && (
+      {user && !isHomePage && (
       <Sider
         collapsible
         collapsed={collapsed}
@@ -553,16 +539,55 @@ export const AppLayout: React.FC = () => {
             zIndex: 90,
           }}
         >
-          {/* Left: Collapse Button + Breadcrumbs directly in Header */}
+          {/* Left: Brand Logo on Home / Landing Page OR Sidebar Collapse Toggle on Internal Pages */}
           <Space orientation="horizontal" size={16} align="center">
-            <Button
-              type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              style={{ fontSize: 18, color: '#475569' }}
-            />
-
-            <Breadcrumb items={breadcrumbItems} style={{ fontSize: 13.5 }} />
+            {isHomePage ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  cursor: 'pointer',
+                }}
+                onClick={() => navigate('/')}
+              >
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 12,
+                    background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#FFFFFF',
+                    fontWeight: 800,
+                    fontSize: 17,
+                    boxShadow: '0 2px 10px rgba(79, 70, 229, 0.35)',
+                    flexShrink: 0,
+                  }}
+                >
+                  MT
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 18, color: '#0F172A', lineHeight: 1.2 }}>
+                    Market<span style={{ color: '#4F46E5' }}>Twin</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, letterSpacing: 0.5 }}>
+                    DEMAND-DRIVEN B2B
+                  </div>
+                </div>
+              </div>
+            ) : (
+              user && (
+                <Button
+                  type="text"
+                  icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                  onClick={() => setCollapsed(!collapsed)}
+                  style={{ fontSize: 18, color: '#475569' }}
+                />
+              )
+            )}
           </Space>
 
           {/* Center: Global Search Input matching reference */}
@@ -598,22 +623,22 @@ export const AppLayout: React.FC = () => {
 
           {/* Right: Switch Role + Backend Indicator + Bell + User Icon + Avatar + Account ▾ */}
           <Space orientation="horizontal" size={14} align="center">
-            <Tag
-              color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
-              style={{ textTransform: 'capitalize', fontSize: 12.5, padding: '3px 12px', borderRadius: 14, fontWeight: 600 }}
-            >
-              {activeRole}
-            </Tag>
-
-            {/* Notifications Popover */}
-            <Popover content={notificationContent} trigger="click" placement="bottomRight">
-              <Badge count={unreadCount} size="small" offset={[-2, 4]}>
-                <Button type="text" shape="circle" icon={<BellOutlined style={{ fontSize: 19, color: '#475569' }} />} />
-              </Badge>
-            </Popover>
-
             {user ? (
               <>
+                <Tag
+                  color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
+                  style={{ textTransform: 'capitalize', fontSize: 12.5, padding: '3px 12px', borderRadius: 14, fontWeight: 600 }}
+                >
+                  {activeRole}
+                </Tag>
+
+                {/* Notifications Popover */}
+                <Popover content={notificationContent} trigger="click" placement="bottomRight">
+                  <Badge count={unreadCount} size="small" offset={[-2, 4]}>
+                    <Button type="text" shape="circle" icon={<BellOutlined style={{ fontSize: 19, color: '#475569' }} />} />
+                  </Badge>
+                </Popover>
+
                 {/* User Silhouette Icon */}
                 <Button
                   type="text"
