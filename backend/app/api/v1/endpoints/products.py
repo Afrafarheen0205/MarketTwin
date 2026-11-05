@@ -2,7 +2,13 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.schemas.product import ProductListResponse, ProductResponse
+from app.schemas.product import (
+    ProductListResponse,
+    ProductMatchRequest,
+    ProductMatchResponse,
+    ProductResponse,
+    ProductSearchResponse,
+)
 from app.services.product_service import ProductService
 
 logger = logging.getLogger("markettwin.api.products")
@@ -24,6 +30,11 @@ async def get_products(
     Supports real-time search, category taxonomy filtering, price ceiling/floor, and multi-mode sorting.
     """
     try:
+        if min_price is not None and max_price is not None and min_price > max_price:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="min_price cannot be greater than max_price.",
+            )
         return ProductService.list_products(
             page=page,
             page_size=page_size,
@@ -34,6 +45,8 @@ async def get_products(
             sort_by=sort_by,
             only_active=True,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Error fetching products: {exc}", exc_info=True)
         raise HTTPException(
@@ -52,6 +65,69 @@ async def get_product_categories():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to fetch product categories.",
+        )
+
+
+@router.get("/search", response_model=ProductSearchResponse, summary="Search and match active products with relevance ranking")
+async def search_products(
+    q: Optional[str] = Query(default=None, description="Search query keywords, brand, model number or technical specifications"),
+    category: Optional[str] = Query(default=None, description="Filter by category"),
+    min_price: Optional[float] = Query(default=None, ge=0, description="Minimum price filter"),
+    max_price: Optional[float] = Query(default=None, ge=0, description="Maximum price filter"),
+    sort: Optional[str] = Query(default="relevance", description="Sorting order: relevance | price_asc | price_desc | newest"),
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=12, ge=1, le=100, description="Results per page"),
+):
+    """
+    Phase 6 Engine: Searches active commercial catalogue products and partitions results
+    into Exact Matches and Similar Suggestions with explainable match reasons and relevance scores.
+    """
+    allowed_sorts = {"relevance", "price_asc", "price_desc", "newest"}
+    sort_clean = (sort or "relevance").lower().strip()
+    if sort_clean not in allowed_sorts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid sort option '{sort}'. Must be one of: {', '.join(sorted(allowed_sorts))}.",
+        )
+
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_price cannot be greater than max_price.",
+        )
+
+    try:
+        return ProductService.search_and_match_products(
+            query=q,
+            category=category,
+            min_price=min_price,
+            max_price=max_price,
+            sort=sort_clean,
+            page=page,
+            page_size=page_size,
+            only_active=True,
+        )
+    except Exception as exc:
+        logger.error(f"Error executing product search for query '{q}': {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Product search failed: {str(exc)}",
+        )
+
+
+@router.post("/match", response_model=ProductMatchResponse, summary="Match demand specifications against existing catalogue")
+async def match_product_specifications(payload: ProductMatchRequest):
+    """
+    Evaluate incoming customer requirements or demand specifications against verified catalogue items.
+    Returns ranked matches, recommendation ('use_catalog' vs. 'create_demand'), and prefilled demand parameters.
+    """
+    try:
+        return ProductService.match_demand_parameters(payload)
+    except Exception as exc:
+        logger.error(f"Error executing specification match: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Specification matching failed: {str(exc)}",
         )
 
 

@@ -1,11 +1,22 @@
 import logging
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.supabase import get_supabase_client
-from app.schemas.product import ProductCreate, ProductListResponse, ProductResponse, ProductUpdate, generate_slug
+from app.schemas.product import (
+    ProductCreate,
+    ProductListResponse,
+    ProductMatchItem,
+    ProductMatchRequest,
+    ProductMatchResponse,
+    ProductResponse,
+    ProductSearchResponse,
+    ProductUpdate,
+    generate_slug,
+)
 
 logger = logging.getLogger("markettwin.products")
 
@@ -17,25 +28,6 @@ def check_extended_schema() -> bool:
     global _has_extended_schema
     if _has_extended_schema is not None:
         return _has_extended_schema
-
-
-def safe_execute(query_fn, max_retries: int = 2):
-    """Execute a Supabase query builder function with auto-retry on transient remote connection drops."""
-    from app.core.supabase import reset_supabase_client
-    last_exc = None
-    for attempt in range(max_retries):
-        try:
-            return query_fn()
-        except Exception as exc:
-            last_exc = exc
-            err_str = str(exc)
-            if ("10054" in err_str or "closed by the remote host" in err_str or "readerror" in err_str.lower()) and attempt < max_retries - 1:
-                logger.warning(f"Retrying query after transient connection drop: {exc}")
-                reset_supabase_client()
-                continue
-            raise
-    if last_exc:
-        raise last_exc
     client = get_supabase_client()
     if not client:
         return False
@@ -238,6 +230,261 @@ class ProductService:
         )
 
     @staticmethod
+    def search_and_match_products(
+        query: Optional[str] = None,
+        category: Optional[str] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        sort: str = "relevance",
+        page: int = 1,
+        page_size: int = 12,
+        only_active: bool = True,
+    ) -> ProductSearchResponse:
+        """
+        Phase 6 Core Engine: Searches, evaluates, and ranks products into Exact Matches and Similar Suggestions.
+        Compares query tokens against product name, brand, model_number, category, description, and specifications.
+        """
+        client = get_supabase_client()
+        if not client:
+            return ProductSearchResponse(
+                items=[],
+                exact_matches=[],
+                similar_matches=[],
+                total=0,
+                exact_count=0,
+                similar_count=0,
+                page=page,
+                page_size=page_size,
+                total_pages=0,
+                query=query or "",
+                has_exact_match=False,
+                suggestion_message="Catalogue database service currently offline.",
+            )
+
+        # Retrieve catalog records safely
+        res = safe_execute(lambda: get_supabase_client().table("products").select("*").execute())
+        raw_items: List[Dict[str, Any]] = res.data or []
+        normalized_products = [_normalize_product(row) for row in raw_items]
+
+        # Enforce active products only for customer public search
+        if only_active:
+            normalized_products = [p for p in normalized_products if p.status == "active"]
+
+        # Category filter if specified
+        if category and category.lower() != "all":
+            c_low = category.lower().strip()
+            normalized_products = [p for p in normalized_products if c_low in p.category.lower()]
+
+        # Price range filter if specified
+        if min_price is not None:
+            normalized_products = [p for p in normalized_products if p.retail_price >= min_price]
+        if max_price is not None:
+            normalized_products = [p for p in normalized_products if p.retail_price <= max_price]
+
+        cleaned_q = (query or "").strip()
+        q_lower = cleaned_q.lower()
+        tokens = [t for t in re.split(r"[,\s\-_/]+", q_lower) if len(t) >= 2]
+
+        scored_items: List[ProductMatchItem] = []
+
+        if not cleaned_q:
+            # When no query is provided, return all filtered products
+            for p in normalized_products:
+                scored_items.append(
+                    ProductMatchItem(
+                        **p.model_dump(),
+                        match_type="exact",
+                        relevance_score=1.0,
+                        match_reasons=["Catalog standard inventory"],
+                    )
+                )
+        else:
+            for p in normalized_products:
+                name_low = p.name.lower()
+                brand_low = (p.brand or "").lower()
+                model_low = (p.model_number or p.sku or "").lower()
+                cat_low = p.category.lower()
+                desc_low = (p.description or "").lower()
+                specs = p.specifications or {}
+
+                score = 0.0
+                reasons: List[str] = []
+                is_exact = False
+
+                # 1. Exact Model Number or SKU match
+                clean_model = model_low.replace("-", "").replace(" ", "")
+                clean_q = q_lower.replace("-", "").replace(" ", "")
+                if model_low and (q_lower == model_low or clean_q == clean_model):
+                    score = 1.0
+                    is_exact = True
+                    reasons.append(f"Exact Model Number match: {p.model_number or p.sku}")
+                elif model_low and (model_low in q_lower or (len(q_lower) >= 3 and q_lower in model_low)):
+                    score = max(score, 0.95)
+                    is_exact = True
+                    reasons.append(f"Model Number match: {p.model_number or p.sku}")
+
+                # 2. Exact Title Match or Contiguous Substring
+                if q_lower == name_low:
+                    score = max(score, 1.0)
+                    is_exact = True
+                    reasons.append("Exact product title match")
+                elif len(q_lower) >= 4 and q_lower in name_low:
+                    score = max(score, 0.90)
+                    is_exact = True
+                    reasons.append(f"Product title contains '{cleaned_q}'")
+
+                # 3. Brand Matching
+                if brand_low and brand_low in q_lower:
+                    other_tokens = [t for t in tokens if t != brand_low]
+                    if other_tokens and any(t in name_low or t in model_low for t in other_tokens):
+                        score = max(score, 0.92)
+                        is_exact = True
+                        reasons.append(f"Brand '{p.brand}' and model matched")
+                    else:
+                        score += 0.35
+                        reasons.append(f"Brand match: {p.brand}")
+
+                # 4. Token overlap in Title
+                matching_title_tokens = [t for t in tokens if t in name_low]
+                if matching_title_tokens:
+                    token_ratio = len(matching_title_tokens) / max(1, len(tokens))
+                    title_boost = 0.45 * token_ratio
+                    score += title_boost
+                    reasons.append(f"Title keywords: {', '.join(matching_title_tokens)}")
+
+                # 5. Technical Specifications match
+                matching_specs: List[str] = []
+                for sk, sv in specs.items():
+                    sk_str = str(sk).lower()
+                    sv_str = str(sv).lower()
+                    for t in tokens:
+                        if (len(t) >= 3 and t in sv_str) or (len(t) >= 4 and t in sk_str):
+                            matching_specs.append(f"{sk}: {sv}")
+                            break
+                if matching_specs:
+                    spec_boost = min(0.35, 0.15 * len(matching_specs))
+                    score += spec_boost
+                    reasons.append(f"Specification match: {', '.join(matching_specs[:2])}")
+
+                # 6. Category taxonomy relevance
+                if any(t in cat_low for t in tokens):
+                    score += 0.20
+                    reasons.append(f"Category relevance: {p.category}")
+
+                # 7. Description feature relevance
+                desc_tokens = [t for t in tokens if t in desc_low and t not in matching_title_tokens]
+                if desc_tokens:
+                    score += min(0.15, 0.05 * len(desc_tokens))
+                    reasons.append(f"Description matches: {', '.join(desc_tokens[:2])}")
+
+                final_score = min(1.0, round(score, 2))
+
+                # Classify into exact match vs. similar suggestion
+                if is_exact or final_score >= 0.85:
+                    scored_items.append(
+                        ProductMatchItem(
+                            **p.model_dump(),
+                            match_type="exact",
+                            relevance_score=max(0.85, final_score),
+                            match_reasons=reasons or ["Direct catalogue match"],
+                        )
+                    )
+                elif final_score >= 0.20:
+                    scored_items.append(
+                        ProductMatchItem(
+                            **p.model_dump(),
+                            match_type="similar",
+                            relevance_score=final_score,
+                            match_reasons=reasons or ["Similar category characteristics"],
+                        )
+                    )
+
+        # Separate exact matches and similar matches
+        exact_matches = [it for it in scored_items if it.match_type == "exact"]
+        similar_matches = [it for it in scored_items if it.match_type == "similar"]
+
+        # Sort the results
+        if sort == "price_asc":
+            scored_items.sort(key=lambda x: x.retail_price)
+        elif sort == "price_desc":
+            scored_items.sort(key=lambda x: x.retail_price, reverse=True)
+        elif sort == "newest":
+            scored_items.sort(key=lambda x: x.created_at or "", reverse=True)
+        else:  # relevance
+            scored_items.sort(key=lambda x: (1 if x.match_type == "exact" else 0, x.relevance_score), reverse=True)
+
+        total = len(scored_items)
+        total_pages = max(1, math.ceil(total / page_size)) if total > 0 else 0
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_items = scored_items[start_idx:end_idx]
+
+        has_exact = len(exact_matches) > 0
+        if not has_exact and len(similar_matches) > 0:
+            suggestion_msg = (
+                "We couldn't find an exact match for your product, but found related items in our catalogue. "
+                "You can inspect them below or initiate a custom demand."
+            )
+        elif total == 0:
+            suggestion_msg = (
+                "We couldn't find an exact match for your product. "
+                "Initiate a custom demand to aggregate volume and invite certified merchant bids."
+            )
+        else:
+            suggestion_msg = None
+
+        return ProductSearchResponse(
+            items=paginated_items,
+            exact_matches=exact_matches,
+            similar_matches=similar_matches,
+            total=total,
+            exact_count=len(exact_matches),
+            similar_count=len(similar_matches),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            query=cleaned_q,
+            has_exact_match=has_exact,
+            suggestion_message=suggestion_msg,
+        )
+
+    @staticmethod
+    def match_demand_parameters(request: ProductMatchRequest) -> ProductMatchResponse:
+        """
+        Evaluate customer demand parameters against catalog to determine if standard items exist or custom demand is required.
+        """
+        search_res = ProductService.search_and_match_products(
+            query=request.query,
+            category=request.category,
+            max_price=request.target_price,
+            only_active=True,
+        )
+
+        has_exact = search_res.has_exact_match and len(search_res.exact_matches) > 0
+        recommendation = "use_catalog" if has_exact else "create_demand"
+
+        first_item = search_res.items[0] if search_res.items else None
+        target_cat = request.category or (first_item.category if first_item else "Industrial Hardware")
+        target_price = request.target_price or (first_item.wholesale_price if first_item else 100.0)
+
+        create_params = {
+            "product": request.query or (first_item.name if first_item else ""),
+            "category": target_cat,
+            "targetPrice": target_price,
+            "targetQuantity": request.target_quantity or (first_item.minimum_order_quantity if first_item else 5),
+            "description": f"Custom specification for {request.query or 'requested item'}",
+        }
+
+        return ProductMatchResponse(
+            matches=search_res.items,
+            has_exact_match=has_exact,
+            exact_match_count=search_res.exact_count,
+            similar_match_count=search_res.similar_count,
+            recommendation=recommendation,
+            create_demand_params=create_params,
+        )
+
+    @staticmethod
     def get_product_by_id_or_slug(identifier: str, only_active: bool = False) -> Optional[ProductResponse]:
         client = get_supabase_client()
         if not client:
@@ -430,7 +677,7 @@ class ProductService:
             return False
 
         if hard_delete:
-            res = client.table("products").delete().eq("id", product_id).execute()
+            res = safe_execute(lambda: get_supabase_client().table("products").delete().eq("id", product_id).execute())
             return bool(res.data)
         else:
             # Soft delete / deactivate
@@ -439,9 +686,9 @@ class ProductService:
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
             try:
-                client.table("products").update({**update_data, "status": "inactive"}).eq("id", product_id).execute()
+                safe_execute(lambda: get_supabase_client().table("products").update({**update_data, "status": "inactive"}).eq("id", product_id).execute())
             except Exception:
-                client.table("products").update(update_data).eq("id", product_id).execute()
+                safe_execute(lambda: get_supabase_client().table("products").update(update_data).eq("id", product_id).execute())
             return True
 
     @staticmethod
