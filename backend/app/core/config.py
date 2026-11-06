@@ -1,6 +1,6 @@
 import os
 from functools import lru_cache
-from typing import List, Union
+from typing import Any, List, Union
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, v: Any) -> bool:
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "t", "yes", "y", "dev", "development")
+        return bool(v)
 
     # CORS
     ALLOWED_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173"

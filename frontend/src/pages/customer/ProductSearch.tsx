@@ -38,6 +38,7 @@ import {
   InfoCircleOutlined,
   ArrowRightOutlined,
   FireOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { productApi, ProductMatchItem, ProductSearchResponse } from '../../api/productApi';
 
@@ -56,7 +57,7 @@ export const ProductSearch: React.FC = () => {
   const [minPrice, setMinPrice] = useState<number | undefined>(undefined);
   const [maxPrice, setMaxPrice] = useState<number | undefined>(undefined);
   const [sortOrder, setSortOrder] = useState<'relevance' | 'price_asc' | 'price_desc' | 'newest'>('relevance');
-  const [matchFilter, setMatchFilter] = useState<'all' | 'exact' | 'similar'>('all');
+  const [matchFilter, setMatchFilter] = useState<'all' | 'exact' | 'similar' | 'alternative' | 'related'>('all');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Pagination
@@ -99,8 +100,22 @@ export const ProductSearch: React.FC = () => {
     return () => clearTimeout(handler);
   }, [query]);
 
+  // Check if user has specified any search query or requirement filter
+  const hasActiveQuery = Boolean(
+    debouncedQuery ||
+    (selectedCategory && selectedCategory !== 'all') ||
+    minPrice !== undefined ||
+    maxPrice !== undefined
+  );
+
   // 3. Core Search Functionality with Stale Response Prevention
   const executeSearch = useCallback(async () => {
+    if (!hasActiveQuery) {
+      setSearchResult(null);
+      setLoading(false);
+      return;
+    }
+
     const currentSeq = ++searchSeqRef.current;
     setLoading(true);
     setErrorMsg(null);
@@ -142,6 +157,8 @@ export const ProductSearch: React.FC = () => {
   const displayedItems = (searchResult?.items || []).filter((item) => {
     if (matchFilter === 'exact') return item.match_type === 'exact';
     if (matchFilter === 'similar') return item.match_type === 'similar';
+    if (matchFilter === 'alternative') return item.match_type === 'alternative';
+    if (matchFilter === 'related') return item.match_type === 'related';
     return true;
   });
 
@@ -206,13 +223,24 @@ export const ProductSearch: React.FC = () => {
       key: 'match_type',
       render: (_: any, r: ProductMatchItem) => (
         <Space orientation="vertical" size={2}>
-          {r.match_type === 'exact' ? (
+          {r.match_type === 'exact' && (
             <Tag color="success" icon={<CheckCircleOutlined />} style={{ borderRadius: 12, fontWeight: 700 }}>
               Exact Match
             </Tag>
-          ) : (
-            <Tag color="purple" icon={<ThunderboltOutlined />} style={{ borderRadius: 12, fontWeight: 600 }}>
-              Similar Suggestion
+          )}
+          {r.match_type === 'similar' && (
+            <Tag color="blue" icon={<ThunderboltOutlined />} style={{ borderRadius: 12, fontWeight: 600 }}>
+              Similar Match
+            </Tag>
+          )}
+          {r.match_type === 'alternative' && (
+            <Tag color="orange" icon={<SwapOutlined />} style={{ borderRadius: 12, fontWeight: 700 }}>
+              Alternative
+            </Tag>
+          )}
+          {r.match_type === 'related' && (
+            <Tag color="purple" icon={<AppstoreOutlined />} style={{ borderRadius: 12, fontWeight: 600 }}>
+              Related
             </Tag>
           )}
           {r.match_reasons?.[0] && (
@@ -456,7 +484,7 @@ export const ProductSearch: React.FC = () => {
         </Row>
       </Card>
 
-      {/* 3. Match Distinction Filters (All vs Exact vs Similar) */}
+      {/* 3. Match Distinction Filters (All vs Exact vs Similar vs Alternative vs Related) */}
       {searchResult && searchResult.total > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <Radio.Group
@@ -469,11 +497,19 @@ export const ProductSearch: React.FC = () => {
             </Radio.Button>
             <Radio.Button value="exact">
               <CheckCircleOutlined style={{ marginRight: 4, color: '#059669' }} />
-              Exact Matches ({searchResult.exact_count})
+              Exact ({searchResult.exact_count})
             </Radio.Button>
             <Radio.Button value="similar">
-              <ThunderboltOutlined style={{ marginRight: 4, color: '#7C3AED' }} />
-              Similar Suggestions ({searchResult.similar_count})
+              <ThunderboltOutlined style={{ marginRight: 4, color: '#1677FF' }} />
+              Similar ({searchResult.similar_count})
+            </Radio.Button>
+            <Radio.Button value="alternative">
+              <SwapOutlined style={{ marginRight: 4, color: '#FA8C16' }} />
+              Alternatives ({searchResult.alternative_count || 0})
+            </Radio.Button>
+            <Radio.Button value="related">
+              <AppstoreOutlined style={{ marginRight: 4, color: '#722ED1' }} />
+              Related ({searchResult.related_count || 0})
             </Radio.Button>
           </Radio.Group>
 
@@ -523,7 +559,106 @@ export const ProductSearch: React.FC = () => {
       )}
 
       {/* 5. Results Area */}
-      {loading ? (
+      {!hasActiveQuery ? (
+        <Card
+          style={{
+            background: '#FFFFFF',
+            borderColor: '#E2E8F0',
+            borderRadius: 12,
+            padding: '52px 24px',
+            textAlign: 'center',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+          }}
+          styles={{ body: { padding: 0 } }}
+        >
+          <div style={{ maxWidth: 660, margin: '0 auto' }}>
+            <div
+              style={{
+                width: 68,
+                height: 68,
+                borderRadius: '50%',
+                background: '#F0F7FF',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 20,
+                border: '1px solid #BAE0FF',
+              }}
+            >
+              <SearchOutlined style={{ fontSize: 30, color: '#1677FF' }} />
+            </div>
+
+            <Title level={4} style={{ color: '#172B4D', margin: 0, fontWeight: 700 }}>
+              Search by Specifications or Model Requirements
+            </Title>
+            <Paragraph type="secondary" style={{ fontSize: 14, color: '#64748B', marginTop: 10, lineHeight: 1.6 }}>
+              Products will be matched and ranked by relevance against your specifications. Enter a model number, part description, or engineering requirement in the search box above.
+            </Paragraph>
+
+            <Alert
+              message={
+                <div style={{ fontSize: 13, color: '#334155', textAlign: 'left' }}>
+                  <strong>E-Commerce Store Link:</strong> External e-commerce product feeds are not linked yet. Once connected, items matching your specifications will stream and rank here automatically.
+                </div>
+              }
+              type="info"
+              showIcon
+              style={{
+                background: '#F8FAFC',
+                borderColor: '#E2E8F0',
+                borderRadius: 8,
+                textAlign: 'left',
+                margin: '22px auto 26px auto',
+                maxWidth: 580,
+              }}
+            />
+
+            <div style={{ margin: '16px 0 24px 0' }}>
+              <Text strong style={{ fontSize: 13, color: '#475569', display: 'block', marginBottom: 12 }}>
+                Try searching one of these sample specifications:
+              </Text>
+              <Space wrap size={[8, 10]} style={{ justifyContent: 'center' }}>
+                {sampleSuggestions.map((item) => (
+                  <Button
+                    key={item}
+                    size="middle"
+                    onClick={() => {
+                      setQuery(item);
+                      setDebouncedQuery(item);
+                    }}
+                    style={{
+                      borderRadius: 20,
+                      fontSize: 13,
+                      background: '#F1F5F9',
+                      borderColor: '#CBD5E1',
+                      color: '#1E293B',
+                      fontWeight: 500,
+                    }}
+                  >
+                    🔍 {item}
+                  </Button>
+                ))}
+              </Space>
+            </div>
+
+            <Divider style={{ margin: '24px 0' }} />
+
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12 }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                Need a custom unlisted part or specialized build?
+              </Text>
+              <Button
+                type="primary"
+                icon={<AppstoreAddOutlined />}
+                onClick={handleCreateDemandRedirect}
+                style={{ borderRadius: 8, fontWeight: 600, background: '#1677FF' }}
+              >
+                Create Product Demand Pool
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : loading ? (
         <Row gutter={[20, 20]}>
           {Array.from({ length: 6 }).map((_, idx) => (
             <Col xs={24} sm={12} lg={8} xl={6} key={idx}>
@@ -582,13 +717,24 @@ export const ProductSearch: React.FC = () => {
                           />
                           {/* Match Classification Badge */}
                           <div style={{ position: 'absolute', top: 10, right: 8 }}>
-                            {isExact ? (
+                            {product.match_type === 'exact' && (
                               <Tag color="success" style={{ margin: 0, fontWeight: 700, borderRadius: 12 }}>
                                 <CheckCircleOutlined /> Exact Match
                               </Tag>
-                            ) : (
+                            )}
+                            {product.match_type === 'similar' && (
+                              <Tag color="blue" style={{ margin: 0, fontWeight: 600, borderRadius: 12 }}>
+                                <ThunderboltOutlined /> Similar Match
+                              </Tag>
+                            )}
+                            {product.match_type === 'alternative' && (
+                              <Tag color="orange" style={{ margin: 0, fontWeight: 700, borderRadius: 12 }}>
+                                <SwapOutlined /> Alternative
+                              </Tag>
+                            )}
+                            {product.match_type === 'related' && (
                               <Tag color="purple" style={{ margin: 0, fontWeight: 600, borderRadius: 12 }}>
-                                <ThunderboltOutlined /> Similar Suggestion
+                                <AppstoreOutlined /> Related
                               </Tag>
                             )}
                           </div>
