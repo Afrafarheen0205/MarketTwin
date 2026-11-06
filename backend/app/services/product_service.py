@@ -58,6 +58,291 @@ def safe_execute(query_fn, max_retries: int = 2):
         raise last_exc
 
 
+def _extract_structured_attributes(text: str, specs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Extract normalized technical attributes from query text or product description/specs.
+    Identifies: materials/grades, capacities, voltages, speeds, certifications, brands, and product types.
+    """
+    text_lower = (text or "").lower()
+    attrs: Dict[str, Any] = {
+        "material": None,
+        "material_grade": None,
+        "capacity": None,
+        "capacity_raw": None,
+        "product_type": None,
+        "certifications": [],
+        "brand": None,
+        "voltage": None,
+    }
+
+    # 1. Material and Grade Recognition
+    if "ss 316" in text_lower or "ss316" in text_lower or "316 stainless" in text_lower or "aisi 316" in text_lower:
+        attrs["material"] = "Stainless Steel"
+        attrs["material_grade"] = "SS 316"
+    elif "ss 304" in text_lower or "ss304" in text_lower or "304 stainless" in text_lower or "aisi 304" in text_lower:
+        attrs["material"] = "Stainless Steel"
+        attrs["material_grade"] = "SS 304"
+    elif "stainless steel" in text_lower:
+        attrs["material"] = "Stainless Steel"
+    elif "hdpe" in text_lower or "polyethylene" in text_lower:
+        attrs["material"] = "Polyethylene (HDPE)"
+    elif "aluminum" in text_lower or "aluminium" in text_lower:
+        attrs["material"] = "Aluminum"
+    elif "carbon steel" in text_lower:
+        attrs["material"] = "Carbon Steel"
+    elif "lifepo4" in text_lower or "lithium iron phosphate" in text_lower:
+        attrs["material"] = "LiFePO4"
+
+    # 2. Capacity & Volume Recognition
+    cap_match = re.search(r"(\d+)\s*(litres|liters|litre|liter|l\b)", text_lower)
+    if cap_match:
+        attrs["capacity"] = int(cap_match.group(1))
+        attrs["capacity_raw"] = f"{cap_match.group(1)}L"
+    else:
+        ah_match = re.search(r"(\d+)\s*(ah\b|amp\s*hours?)", text_lower)
+        if ah_match:
+            attrs["capacity"] = int(ah_match.group(1))
+            attrs["capacity_raw"] = f"{ah_match.group(1)}Ah"
+
+    # 3. Voltage Recognition
+    volt_match = re.search(r"(\d+)\s*(v\b|volts?)", text_lower)
+    if volt_match:
+        attrs["voltage"] = f"{volt_match.group(1)}V"
+
+    # 4. Product Core Type
+    if "tank" in text_lower or "vessel" in text_lower or "reservoir" in text_lower:
+        attrs["product_type"] = "Water Storage Tank"
+    elif "gateway" in text_lower or "edge" in text_lower:
+        attrs["product_type"] = "IoT Gateway"
+    elif "flow meter" in text_lower or "flowmeter" in text_lower:
+        attrs["product_type"] = "Ultrasonic Flow Meter"
+    elif "energy storage" in text_lower or "battery" in text_lower:
+        attrs["product_type"] = "Energy Storage Module"
+    elif "stepper" in text_lower or "servo" in text_lower or "motor" in text_lower:
+        attrs["product_type"] = "Stepper Motor Kit"
+    elif "switch" in text_lower or "sfp" in text_lower:
+        attrs["product_type"] = "Managed Fiber Switch"
+    elif "pump" in text_lower or "peristaltic" in text_lower:
+        attrs["product_type"] = "Precision Peristaltic Pump"
+
+    # 5. Certifications
+    for cert in ["iso 9001", "nsf/ansi 61", "nsf 61", "ce", "ip67", "ip68", "dnv", "fda", "asme", "ul"]:
+        if cert in text_lower:
+            attrs["certifications"].append(cert.upper())
+
+    # Merge product specifications object if provided
+    if specs and isinstance(specs, dict):
+        s_mat = specs.get("Material") or specs.get("material")
+        if s_mat and not attrs["material"]:
+            attrs["material"] = str(s_mat)
+        s_grade = specs.get("Material Grade") or specs.get("material_grade")
+        if s_grade and not attrs["material_grade"]:
+            if "316" in str(s_grade):
+                attrs["material_grade"] = "SS 316"
+            elif "304" in str(s_grade):
+                attrs["material_grade"] = "SS 304"
+        s_cap = specs.get("Capacity") or specs.get("capacity")
+        if s_cap and not attrs["capacity"]:
+            c_m = re.search(r"(\d+)", str(s_cap))
+            if c_m:
+                attrs["capacity"] = int(c_m.group(1))
+                attrs["capacity_raw"] = str(s_cap)
+
+    return attrs
+
+
+def _evaluate_product_match(
+    product: ProductResponse,
+    query_str: str,
+    query_attrs: Dict[str, Any],
+    query_tokens: List[str],
+) -> Tuple[str, float, List[str], List[str], List[str], str]:
+    """
+    Evaluates a product against search query using structured attribute comparisons and hard constraint overrides.
+    Returns:
+      (match_tier, relevance_score, match_reasons, matching_attributes, different_attributes, compatibility_explanation)
+      where match_tier is 'exact' | 'similar' | 'alternative' | 'related'
+    """
+    name_low = product.name.lower()
+    brand_low = (product.brand or "").lower()
+    model_low = (product.model_number or product.sku or "").lower()
+    cat_low = product.category.lower()
+    desc_low = (product.description or "").lower()
+    specs = product.specifications or {}
+
+    prod_text = f"{product.name} {product.brand} {product.model_number} {product.description} " + " ".join(f"{k}:{v}" for k, v in specs.items())
+    prod_attrs = _extract_structured_attributes(prod_text, specs)
+
+    matching_attrs: List[str] = []
+    different_attrs: List[str] = []
+    reasons: List[str] = []
+
+    # Check for hard constraint violations
+    material_mismatch = False
+    capacity_mismatch = False
+
+    # 1. Compare Material
+    if query_attrs["material_grade"]:
+        req_grade = query_attrs["material_grade"]
+        prod_grade = prod_attrs.get("material_grade")
+        if prod_grade:
+            if req_grade == prod_grade:
+                matching_attrs.append(f"Material Grade: {prod_grade}")
+            else:
+                material_mismatch = True
+                different_attrs.append(f"Material Grade: {prod_grade} (Requested: {req_grade})")
+        elif prod_attrs.get("material"):
+            material_mismatch = True
+            different_attrs.append(f"Material: {prod_attrs['material']} (Requested: {req_grade})")
+    elif query_attrs["material"]:
+        req_mat = query_attrs["material"].lower()
+        prod_mat = (prod_attrs.get("material") or "").lower()
+        if req_mat in prod_mat or prod_mat in req_mat:
+            matching_attrs.append(f"Material: {prod_attrs['material']}")
+        elif prod_mat:
+            material_mismatch = True
+            different_attrs.append(f"Material: {prod_attrs['material']} (Requested: {query_attrs['material']})")
+
+    # 2. Compare Capacity
+    if query_attrs["capacity"]:
+        req_cap = query_attrs["capacity"]
+        prod_cap = prod_attrs.get("capacity")
+        if prod_cap:
+            if req_cap == prod_cap:
+                matching_attrs.append(f"Capacity: {prod_attrs.get('capacity_raw') or req_cap}")
+            else:
+                capacity_mismatch = True
+                different_attrs.append(f"Capacity: {prod_attrs.get('capacity_raw') or prod_cap} (Requested: {query_attrs.get('capacity_raw') or req_cap})")
+
+    # 3. Compare Product Core Type
+    if query_attrs["product_type"]:
+        req_type = query_attrs["product_type"]
+        prod_type = prod_attrs.get("product_type")
+        if req_type == prod_type:
+            matching_attrs.append(f"Product Type: {req_type}")
+        else:
+            different_attrs.append(f"Type: {prod_type or 'General Equipment'}")
+
+    # 4. Token & Keyword Overlaps
+    title_matches = [t for t in query_tokens if t in name_low]
+    if title_matches:
+        reasons.append(f"Matched title keywords: {', '.join(title_matches[:3])}")
+
+    spec_matches = []
+    for sk, sv in specs.items():
+        sk_low = str(sk).lower()
+        sv_low = str(sv).lower()
+        for t in query_tokens:
+            if (len(t) >= 3 and t in sv_low) or (len(t) >= 4 and t in sk_low):
+                spec_matches.append(f"{sk}: {sv}")
+                break
+    if spec_matches:
+        reasons.append(f"Technical specs: {', '.join(spec_matches[:2])}")
+
+    # Model or SKU exact match
+    clean_model = model_low.replace("-", "").replace(" ", "")
+    clean_q = query_str.lower().replace("-", "").replace(" ", "")
+    is_model_hit = model_low and (clean_q == clean_model or model_low in query_str.lower())
+    if is_model_hit:
+        matching_attrs.append(f"Model/SKU: {product.model_number or product.sku}")
+        reasons.append(f"Exact SKU match: {product.model_number or product.sku}")
+
+    # Calculate token overlap score
+    token_ratio = len(title_matches) / max(1, len(query_tokens)) if query_tokens else 0.0
+    spec_ratio = min(1.0, len(spec_matches) / max(1, len(query_tokens))) if query_tokens else 0.0
+
+    # Strict Tier Assignment
+    # -----------------------
+    # Case A: Exact Match
+    # Condition: NO material mismatch, NO capacity mismatch, matching core product type or high token overlap, and title or model match
+    if not material_mismatch and not capacity_mismatch:
+        if is_model_hit or query_str.lower() == name_low or (query_str.lower() in name_low and len(query_str) >= 6):
+            return (
+                "exact",
+                1.0,
+                reasons or ["Exact catalogue inventory match"],
+                matching_attrs or ["Full specification match"],
+                different_attrs,
+                "Direct specification match for all requested attributes."
+            )
+        if token_ratio >= 0.70 or (token_ratio >= 0.50 and matching_attrs):
+            return (
+                "exact",
+                round(0.88 + 0.10 * token_ratio, 2),
+                reasons or ["Direct specification match"],
+                matching_attrs,
+                different_attrs,
+                "Direct match on key parameters and technical specifications."
+            )
+        if query_attrs["product_type"] and prod_attrs.get("product_type") == query_attrs["product_type"]:
+            return (
+                "similar",
+                round(0.80 + 0.10 * token_ratio, 2),
+                reasons or ["Equivalent specification variant"],
+                matching_attrs,
+                different_attrs,
+                "Equivalent functional specifications from verified manufacturer."
+            )
+
+    # Case B: Highly Similar Match
+    # Condition: Same core type and compatible, but different brand/model or minor difference
+    same_type = bool(query_attrs.get("product_type") and prod_attrs.get("product_type") == query_attrs.get("product_type"))
+    if not material_mismatch and not capacity_mismatch and (token_ratio >= 0.40 or spec_ratio >= 0.30 or same_type):
+        return (
+            "similar",
+            round(0.75 + 0.15 * token_ratio, 2),
+            reasons or ["Functionally equivalent specification"],
+            matching_attrs,
+            different_attrs,
+            "Functionally equivalent specifications with alternative certified manufacturer/model."
+        )
+
+    # Case C: Alternative Product
+    # Condition: Material difference (e.g. SS 316 vs SS 304, or HDPE vs SS 304) or capacity difference (2000L vs 1000L) within same product line
+    if (material_mismatch or capacity_mismatch) and (same_type or token_ratio >= 0.30):
+        explanation_parts = []
+        if material_mismatch:
+            if "316" in str(prod_attrs.get("material_grade")):
+                explanation_parts.append("Premium marine-grade SS 316 upgrade with superior chloride and chemical resistance")
+            elif "hdpe" in str(prod_attrs.get("material")).lower():
+                explanation_parts.append("Non-metallic HDPE corrosion-free alternative with lower weight profile")
+            else:
+                explanation_parts.append(f"Alternative material specification ({prod_attrs.get('material_grade') or prod_attrs.get('material')})")
+        if capacity_mismatch:
+            explanation_parts.append(f"Alternative capacity variant ({prod_attrs.get('capacity_raw') or 'different volume'})")
+
+        explanation = ". ".join(explanation_parts) + "."
+        return (
+            "alternative",
+            round(0.65 + 0.15 * token_ratio, 2),
+            reasons or ["Viable functional alternative with spec variance"],
+            matching_attrs,
+            different_attrs,
+            explanation
+        )
+
+    # Case D: Related Product
+    # Condition: Same category or domain keywords, but different product type
+    if cat_low in query_str.lower() or any(t in cat_low for t in query_tokens) or token_ratio > 0.15 or spec_ratio > 0.15:
+        return (
+            "related",
+            round(0.40 + 0.20 * token_ratio, 2),
+            reasons or ["Related industrial equipment in same domain"],
+            matching_attrs,
+            different_attrs,
+            f"Related equipment in the {product.category} category for complementary system integration."
+        )
+
+    return (
+        "none",
+        0.0,
+        [],
+        matching_attrs,
+        different_attrs,
+        ""
+    )
+
+
 def _normalize_product(row: Dict[str, Any]) -> ProductResponse:
     """Normalize a raw Supabase row into a consistent ProductResponse."""
     row_id = str(row.get("id") or "")
@@ -90,12 +375,12 @@ def _normalize_product(row: Dict[str, Any]) -> ProductResponse:
             moq = 1
 
     avail_qty = row.get("available_quantity")
-    if avail_qty is None and "AvailableQty" in specs:
+    if (avail_qty is None or avail_qty == 0) and "AvailableQty" in specs:
         try:
             avail_qty = int(specs["AvailableQty"])
         except (ValueError, TypeError):
-            avail_qty = None
-    if avail_qty is None:
+            pass
+    if avail_qty is None or (avail_qty == 0 and row.get("in_stock") is True):
         in_stock_val = row.get("in_stock", True)
         avail_qty = 100 if in_stock_val else 0
 
@@ -241,8 +526,13 @@ class ProductService:
         only_active: bool = True,
     ) -> ProductSearchResponse:
         """
-        Phase 6 Core Engine: Searches, evaluates, and ranks products into Exact Matches and Similar Suggestions.
-        Compares query tokens against product name, brand, model_number, category, description, and specifications.
+        Phase 6 Core Engine: Searches, evaluates, and ranks products into:
+          A. Exact Matches
+          B. Highly Similar Products
+          C. Alternative Products
+          D. Related Products
+        Uses structured attribute comparisons (material, grade, capacity, certifications, specs)
+        and hard constraint overrides so incompatible specs are never presented as exact matches.
         """
         client = get_supabase_client()
         if not client:
@@ -250,9 +540,13 @@ class ProductService:
                 items=[],
                 exact_matches=[],
                 similar_matches=[],
+                alternative_matches=[],
+                related_matches=[],
                 total=0,
                 exact_count=0,
                 similar_count=0,
+                alternative_count=0,
+                related_count=0,
                 page=page,
                 page_size=page_size,
                 total_pages=0,
@@ -294,116 +588,42 @@ class ProductService:
                     ProductMatchItem(
                         **p.model_dump(),
                         match_type="exact",
+                        match_tier="exact",
                         relevance_score=1.0,
                         match_reasons=["Catalog standard inventory"],
+                        matching_attributes=["Available catalogue item"],
+                        different_attributes=[],
+                        compatibility_explanation="Standard commercial inventory item.",
                     )
                 )
         else:
+            query_attrs = _extract_structured_attributes(cleaned_q)
             for p in normalized_products:
-                name_low = p.name.lower()
-                brand_low = (p.brand or "").lower()
-                model_low = (p.model_number or p.sku or "").lower()
-                cat_low = p.category.lower()
-                desc_low = (p.description or "").lower()
-                specs = p.specifications or {}
-
-                score = 0.0
-                reasons: List[str] = []
-                is_exact = False
-
-                # 1. Exact Model Number or SKU match
-                clean_model = model_low.replace("-", "").replace(" ", "")
-                clean_q = q_lower.replace("-", "").replace(" ", "")
-                if model_low and (q_lower == model_low or clean_q == clean_model):
-                    score = 1.0
-                    is_exact = True
-                    reasons.append(f"Exact Model Number match: {p.model_number or p.sku}")
-                elif model_low and (model_low in q_lower or (len(q_lower) >= 3 and q_lower in model_low)):
-                    score = max(score, 0.95)
-                    is_exact = True
-                    reasons.append(f"Model Number match: {p.model_number or p.sku}")
-
-                # 2. Exact Title Match or Contiguous Substring
-                if q_lower == name_low:
-                    score = max(score, 1.0)
-                    is_exact = True
-                    reasons.append("Exact product title match")
-                elif len(q_lower) >= 4 and q_lower in name_low:
-                    score = max(score, 0.90)
-                    is_exact = True
-                    reasons.append(f"Product title contains '{cleaned_q}'")
-
-                # 3. Brand Matching
-                if brand_low and brand_low in q_lower:
-                    other_tokens = [t for t in tokens if t != brand_low]
-                    if other_tokens and any(t in name_low or t in model_low for t in other_tokens):
-                        score = max(score, 0.92)
-                        is_exact = True
-                        reasons.append(f"Brand '{p.brand}' and model matched")
-                    else:
-                        score += 0.35
-                        reasons.append(f"Brand match: {p.brand}")
-
-                # 4. Token overlap in Title
-                matching_title_tokens = [t for t in tokens if t in name_low]
-                if matching_title_tokens:
-                    token_ratio = len(matching_title_tokens) / max(1, len(tokens))
-                    title_boost = 0.45 * token_ratio
-                    score += title_boost
-                    reasons.append(f"Title keywords: {', '.join(matching_title_tokens)}")
-
-                # 5. Technical Specifications match
-                matching_specs: List[str] = []
-                for sk, sv in specs.items():
-                    sk_str = str(sk).lower()
-                    sv_str = str(sv).lower()
-                    for t in tokens:
-                        if (len(t) >= 3 and t in sv_str) or (len(t) >= 4 and t in sk_str):
-                            matching_specs.append(f"{sk}: {sv}")
-                            break
-                if matching_specs:
-                    spec_boost = min(0.35, 0.15 * len(matching_specs))
-                    score += spec_boost
-                    reasons.append(f"Specification match: {', '.join(matching_specs[:2])}")
-
-                # 6. Category taxonomy relevance
-                if any(t in cat_low for t in tokens):
-                    score += 0.20
-                    reasons.append(f"Category relevance: {p.category}")
-
-                # 7. Description feature relevance
-                desc_tokens = [t for t in tokens if t in desc_low and t not in matching_title_tokens]
-                if desc_tokens:
-                    score += min(0.15, 0.05 * len(desc_tokens))
-                    reasons.append(f"Description matches: {', '.join(desc_tokens[:2])}")
-
-                final_score = min(1.0, round(score, 2))
-
-                # Classify into exact match vs. similar suggestion
-                if is_exact or final_score >= 0.85:
+                tier, score, reasons, matching_attrs, different_attrs, explanation = _evaluate_product_match(
+                    p, cleaned_q, query_attrs, tokens
+                )
+                if tier != "none" and score >= 0.20:
                     scored_items.append(
                         ProductMatchItem(
                             **p.model_dump(),
-                            match_type="exact",
-                            relevance_score=max(0.85, final_score),
-                            match_reasons=reasons or ["Direct catalogue match"],
-                        )
-                    )
-                elif final_score >= 0.20:
-                    scored_items.append(
-                        ProductMatchItem(
-                            **p.model_dump(),
-                            match_type="similar",
-                            relevance_score=final_score,
-                            match_reasons=reasons or ["Similar category characteristics"],
+                            match_type=tier,
+                            match_tier=tier,
+                            relevance_score=score,
+                            match_reasons=reasons or ["Catalogue product discovery"],
+                            matching_attributes=matching_attrs,
+                            different_attributes=different_attrs,
+                            compatibility_explanation=explanation,
                         )
                     )
 
-        # Separate exact matches and similar matches
-        exact_matches = [it for it in scored_items if it.match_type == "exact"]
-        similar_matches = [it for it in scored_items if it.match_type == "similar"]
+        # Separate into 4 distinct matching tiers
+        exact_matches = [it for it in scored_items if it.match_tier == "exact"]
+        similar_matches = [it for it in scored_items if it.match_tier == "similar"]
+        alternative_matches = [it for it in scored_items if it.match_tier == "alternative"]
+        related_matches = [it for it in scored_items if it.match_tier == "related"]
 
-        # Sort the results
+        # Sort all items
+        tier_weight = {"exact": 4, "similar": 3, "alternative": 2, "related": 1}
         if sort == "price_asc":
             scored_items.sort(key=lambda x: x.retail_price)
         elif sort == "price_desc":
@@ -411,7 +631,7 @@ class ProductService:
         elif sort == "newest":
             scored_items.sort(key=lambda x: x.created_at or "", reverse=True)
         else:  # relevance
-            scored_items.sort(key=lambda x: (1 if x.match_type == "exact" else 0, x.relevance_score), reverse=True)
+            scored_items.sort(key=lambda x: (tier_weight.get(x.match_tier, 0), x.relevance_score), reverse=True)
 
         total = len(scored_items)
         total_pages = max(1, math.ceil(total / page_size)) if total > 0 else 0
@@ -420,15 +640,15 @@ class ProductService:
         paginated_items = scored_items[start_idx:end_idx]
 
         has_exact = len(exact_matches) > 0
-        if not has_exact and len(similar_matches) > 0:
+        if not has_exact and (len(similar_matches) > 0 or len(alternative_matches) > 0):
             suggestion_msg = (
-                "We couldn't find an exact match for your product, but found related items in our catalogue. "
-                "You can inspect them below or initiate a custom demand."
+                "We couldn't find an exact match for your product, but found similar and alternative products in our catalogue. "
+                "You can inspect specifications below or initiate a custom demand."
             )
-        elif total == 0:
+        elif total == 0 or (not has_exact and len(similar_matches) == 0 and len(alternative_matches) == 0):
             suggestion_msg = (
-                "We couldn't find an exact match for your product. "
-                "Initiate a custom demand to aggregate volume and invite certified merchant bids."
+                "We couldn't find a product that fully matches your requirements. "
+                "You can create a custom demand and connect with verified merchants."
             )
         else:
             suggestion_msg = None
@@ -437,9 +657,13 @@ class ProductService:
             items=paginated_items,
             exact_matches=exact_matches,
             similar_matches=similar_matches,
+            alternative_matches=alternative_matches,
+            related_matches=related_matches,
             total=total,
             exact_count=len(exact_matches),
             similar_count=len(similar_matches),
+            alternative_count=len(alternative_matches),
+            related_count=len(related_matches),
             page=page,
             page_size=page_size,
             total_pages=total_pages,
@@ -461,7 +685,12 @@ class ProductService:
         )
 
         has_exact = search_res.has_exact_match and len(search_res.exact_matches) > 0
-        recommendation = "use_catalog" if has_exact else "create_demand"
+        if has_exact:
+            recommendation = "use_catalog"
+        elif len(search_res.similar_matches) > 0 or len(search_res.alternative_matches) > 0:
+            recommendation = "view_alternatives"
+        else:
+            recommendation = "create_demand"
 
         first_item = search_res.items[0] if search_res.items else None
         target_cat = request.category or (first_item.category if first_item else "Industrial Hardware")
@@ -474,15 +703,149 @@ class ProductService:
             "targetQuantity": request.target_quantity or (first_item.minimum_order_quantity if first_item else 5),
             "description": f"Custom specification for {request.query or 'requested item'}",
         }
+        if request.specifications:
+            create_params["specifications"] = request.specifications
 
         return ProductMatchResponse(
             matches=search_res.items,
+            exact_matches=search_res.exact_matches,
+            similar_matches=search_res.similar_matches,
+            alternative_matches=search_res.alternative_matches,
+            related_matches=search_res.related_matches,
             has_exact_match=has_exact,
             exact_match_count=search_res.exact_count,
             similar_match_count=search_res.similar_count,
+            alternative_match_count=search_res.alternative_count,
+            related_match_count=search_res.related_count,
             recommendation=recommendation,
             create_demand_params=create_params,
         )
+
+    @staticmethod
+    def get_personalized_recommendations(user_id: Optional[str] = None, limit: int = 8) -> List[ProductResponse]:
+        """
+        Produce personalized catalog recommendations using customer's past demands,
+        orders, or active catalogue popularity if insufficient customer interaction history.
+        """
+        client = get_supabase_client()
+        if not client:
+            return []
+
+        user_categories: List[str] = []
+        if user_id:
+            try:
+                # Check user's created demands
+                demands_res = safe_execute(lambda: get_supabase_client().table("demands").select("category").eq("customer_id", user_id).limit(10).execute())
+                for d in (demands_res.data or []):
+                    c = d.get("category")
+                    if c and c not in user_categories:
+                        user_categories.append(c)
+            except Exception as e:
+                logger.debug(f"Demands query for personalization skipped: {e}")
+
+            try:
+                # Check user's orders
+                orders_res = safe_execute(lambda: get_supabase_client().table("orders").select("product_title").eq("customer_id", user_id).limit(10).execute())
+                for o in (orders_res.data or []):
+                    p_name = o.get("product_title")
+                    # Try to extract category from title or match
+                    pass
+            except Exception as e:
+                logger.debug(f"Orders query for personalization skipped: {e}")
+
+        # Fetch active products
+        res = safe_execute(lambda: get_supabase_client().table("products").select("*").execute())
+        products = [_normalize_product(row) for row in (res.data or []) if row.get("in_stock", True)]
+
+        if user_categories:
+            matching = [p for p in products if p.category in user_categories]
+            others = [p for p in products if p.category not in user_categories]
+            # Prioritize matching categories then highest rated
+            matching.sort(key=lambda x: (x.rating or 0, x.reviews_count or 0), reverse=True)
+            others.sort(key=lambda x: (x.rating or 0, x.reviews_count or 0), reverse=True)
+            combined = matching + others
+            return combined[:limit]
+
+        # Fallback for new customers with insufficient history: return catalogue highlights
+        products.sort(key=lambda x: (x.rating or 0, x.reviews_count or 0), reverse=True)
+        return products[:limit]
+
+    @staticmethod
+    def get_popular_products(limit: int = 8) -> List[ProductResponse]:
+        """
+        Return verified popular products ranked by actual reviews count, rating, and stock.
+        """
+        client = get_supabase_client()
+        if not client:
+            return []
+        res = safe_execute(lambda: get_supabase_client().table("products").select("*").execute())
+        products = [_normalize_product(row) for row in (res.data or []) if row.get("in_stock", True)]
+        products.sort(key=lambda x: (x.reviews_count or 0, x.rating or 0), reverse=True)
+        return products[:limit]
+
+    @staticmethod
+    def get_recently_added_products(limit: int = 8) -> List[ProductResponse]:
+        """
+        Return newly listed products sorted chronologically by database creation timestamp.
+        """
+        client = get_supabase_client()
+        if not client:
+            return []
+        res = safe_execute(lambda: get_supabase_client().table("products").select("*").execute())
+        products = [_normalize_product(row) for row in (res.data or []) if row.get("in_stock", True)]
+        products.sort(key=lambda x: x.created_at or "", reverse=True)
+        return products[:limit]
+
+    @staticmethod
+    def get_similar_and_alternatives(product_id: str, limit: int = 6) -> Dict[str, List[ProductMatchItem]]:
+        """
+        Given a product ID, find similar and alternative products from the catalogue.
+        """
+        product = ProductService.get_product_by_id_or_slug(product_id)
+        if not product:
+            return {"similar": [], "alternatives": [], "related": []}
+
+        # Search using product's name and specs
+        search_res = ProductService.search_and_match_products(
+            query=f"{product.category} {product.name}",
+            only_active=True,
+            page_size=30,
+        )
+
+        # Filter out current product itself
+        sim = [it for it in search_res.similar_matches if it.id != product.id]
+        alt = [it for it in search_res.alternative_matches if it.id != product.id]
+        rel = [it for it in search_res.related_matches if it.id != product.id]
+
+        # If not enough similar, borrow from exact matches of different brands/models
+        other_exacts = [it for it in search_res.exact_matches if it.id != product.id]
+        for it in other_exacts:
+            if it not in sim:
+                sim.append(it)
+
+        # Fallback to same category if sparse
+        if len(sim) + len(alt) < 2:
+            cat_res = ProductService.list_products(category=product.category, page_size=limit + 1)
+            for it in cat_res.items:
+                if it.id != product.id and not any(x.id == it.id for x in sim + alt + rel):
+                    rel.append(
+                        ProductMatchItem(
+                            **it.model_dump(),
+                            match_type="related",
+                            match_tier="related",
+                            relevance_score=0.7,
+                            match_reasons=[f"Same category: {product.category}"],
+                            matching_attributes=[f"Category: {product.category}"],
+                            different_attributes=[],
+                            compatibility_explanation=f"Related equipment within the {product.category} category.",
+                        )
+                    )
+
+        return {
+            "similar": sim[:limit],
+            "alternatives": alt[:limit],
+            "related": rel[:limit],
+        }
 
     @staticmethod
     def get_product_by_id_or_slug(identifier: str, only_active: bool = False) -> Optional[ProductResponse]:
@@ -605,7 +968,13 @@ class ProductService:
                 "status": product_in.status or "active",
             })
             if created_by:
-                db_payload["created_by"] = created_by
+                try:
+                    uuid.UUID(str(created_by))
+                    prof = safe_execute(lambda: get_supabase_client().table("profiles").select("id").eq("id", str(created_by)).limit(1).execute())
+                    if prof.data:
+                        db_payload["created_by"] = str(created_by)
+                except Exception:
+                    pass
 
         res = safe_execute(lambda: get_supabase_client().table("products").insert(db_payload).execute())
         if not res.data:

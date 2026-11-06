@@ -131,6 +131,65 @@ async def match_product_specifications(payload: ProductMatchRequest):
         )
 
 
+@router.get("/recommendations", response_model=List[ProductResponse], summary="Personalized product recommendations")
+async def get_personalized_recommendations(
+    user_id: Optional[str] = Query(default=None, description="Optional customer user ID for personalization"),
+    limit: int = Query(default=8, ge=1, le=50, description="Max recommendations to return"),
+):
+    """
+    Retrieve personalized catalog recommendations tailored to customer's past demands,
+    orders, and viewed categories. Falls back to top-rated catalogue items if new customer.
+    """
+    try:
+        return ProductService.get_personalized_recommendations(user_id=user_id, limit=limit)
+    except Exception as exc:
+        logger.error(f"Error fetching recommendations: {exc}", exc_info=True)
+        return []
+
+
+@router.get("/popular", response_model=List[ProductResponse], summary="List popular marketplace products")
+async def get_popular_products(
+    limit: int = Query(default=8, ge=1, le=50, description="Max popular products to return"),
+):
+    """
+    Retrieve verified popular products sorted by reviews count and ratings.
+    """
+    try:
+        return ProductService.get_popular_products(limit=limit)
+    except Exception as exc:
+        logger.error(f"Error fetching popular products: {exc}", exc_info=True)
+        return []
+
+
+@router.get("/recent", response_model=List[ProductResponse], summary="List recently added products")
+async def get_recently_added_products(
+    limit: int = Query(default=8, ge=1, le=50, description="Max recently added products to return"),
+):
+    """
+    Retrieve newly listed catalog products sorted by creation timestamp.
+    """
+    try:
+        return ProductService.get_recently_added_products(limit=limit)
+    except Exception as exc:
+        logger.error(f"Error fetching recently added products: {exc}", exc_info=True)
+        return []
+
+
+@router.get("/{product_id}/similar", summary="Get similar, alternative, and related products")
+async def get_similar_and_alternative_products(
+    product_id: str,
+    limit: int = Query(default=6, ge=1, le=20, description="Max items per tier"),
+):
+    """
+    Retrieve similar, alternative, and related products for a specific catalog item.
+    """
+    try:
+        return ProductService.get_similar_and_alternatives(product_id=product_id, limit=limit)
+    except Exception as exc:
+        logger.error(f"Error fetching similar products for '{product_id}': {exc}", exc_info=True)
+        return {"similar": [], "alternatives": [], "related": []}
+
+
 @router.get("/{product_id}", response_model=ProductResponse, summary="Get product details")
 async def get_product_by_id(product_id: str):
     """

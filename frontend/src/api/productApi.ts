@@ -31,9 +31,13 @@ export interface Product {
 }
 
 export interface ProductMatchItem extends Product {
-  match_type: 'exact' | 'similar';
+  match_type: 'exact' | 'similar' | 'alternative' | 'related';
+  match_tier?: 'exact' | 'similar' | 'alternative' | 'related';
   relevance_score: number;
   match_reasons: string[];
+  matching_attributes?: string[];
+  different_attributes?: string[];
+  compatibility_explanation?: string;
 }
 
 export interface ProductQueryParams {
@@ -68,9 +72,13 @@ export interface ProductSearchResponse {
   items: ProductMatchItem[];
   exact_matches: ProductMatchItem[];
   similar_matches: ProductMatchItem[];
+  alternative_matches?: ProductMatchItem[];
+  related_matches?: ProductMatchItem[];
   total: number;
   exact_count: number;
   similar_count: number;
+  alternative_count?: number;
+  related_count?: number;
   page: number;
   page_size: number;
   total_pages: number;
@@ -89,10 +97,16 @@ export interface ProductMatchRequest {
 
 export interface ProductMatchResponse {
   matches: ProductMatchItem[];
+  exact_matches?: ProductMatchItem[];
+  similar_matches?: ProductMatchItem[];
+  alternative_matches?: ProductMatchItem[];
+  related_matches?: ProductMatchItem[];
   has_exact_match: boolean;
   exact_match_count: number;
   similar_match_count: number;
-  recommendation: 'use_catalog' | 'create_demand';
+  alternative_match_count?: number;
+  related_match_count?: number;
+  recommendation: 'use_catalog' | 'view_alternatives' | 'create_demand';
   create_demand_params: Record<string, any>;
 }
 
@@ -151,6 +165,53 @@ export const productApi = {
    */
   async getProductById(idOrSlug: string): Promise<Product> {
     const res = await axiosClient.get<Product>(`/api/products/${idOrSlug}`);
+    return res.data;
+  },
+
+  /**
+   * Fetch personalized product recommendations for the customer
+   */
+  async getRecommendations(userId?: string, limit: number = 8): Promise<Product[]> {
+    const res = await axiosClient.get<Product[]>('/api/products/recommendations', {
+      params: { user_id: userId, limit },
+    });
+    return res.data;
+  },
+
+  /**
+   * Fetch popular marketplace products
+   */
+  async getPopularProducts(limit: number = 8): Promise<Product[]> {
+    const res = await axiosClient.get<Product[]>('/api/products/popular', {
+      params: { limit },
+    });
+    return res.data;
+  },
+
+  /**
+   * Fetch recently added products
+   */
+  async getRecentlyAddedProducts(limit: number = 8): Promise<Product[]> {
+    const res = await axiosClient.get<Product[]>('/api/products/recent', {
+      params: { limit },
+    });
+    return res.data;
+  },
+
+  /**
+   * Fetch similar, alternative, and related products for a product ID
+   */
+  async getSimilarAndAlternatives(
+    productId: string,
+    limit: number = 6
+  ): Promise<{ similar: ProductMatchItem[]; alternatives: ProductMatchItem[]; related: ProductMatchItem[] }> {
+    const res = await axiosClient.get<{
+      similar: ProductMatchItem[];
+      alternatives: ProductMatchItem[];
+      related: ProductMatchItem[];
+    }>(`/api/products/${productId}/similar`, {
+      params: { limit },
+    });
     return res.data;
   },
 

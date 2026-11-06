@@ -77,20 +77,28 @@ class ProductListResponse(BaseModel):
 
 
 class ProductMatchItem(ProductResponse):
-    """Product item annotated with search relevance and similarity scoring."""
-    match_type: str = Field(default="exact", pattern="^(exact|similar)$", description="'exact' for direct hits, 'similar' for related suggestions")
+    """Product item annotated with search relevance, multi-tier matching category, and structured explanations."""
+    match_type: str = Field(default="exact", pattern="^(exact|similar|alternative|related)$", description="'exact' | 'similar' | 'alternative' | 'related'")
+    match_tier: str = Field(default="exact", pattern="^(exact|similar|alternative|related)$", description="'exact' | 'similar' | 'alternative' | 'related'")
     relevance_score: float = Field(default=1.0, ge=0.0, le=1.0, description="Normalized match relevance score between 0.0 and 1.0")
     match_reasons: List[str] = Field(default_factory=list, description="Explanatory human-readable reasons why this product matched or is suggested")
+    matching_attributes: List[str] = Field(default_factory=list, description="Key specifications or attributes that align with query")
+    different_attributes: List[str] = Field(default_factory=list, description="Key specifications or attributes that differ from query (e.g., material grade, capacity)")
+    compatibility_explanation: str = Field(default="", description="Technical assessment of compatibility and trade-offs")
 
 
 class ProductSearchResponse(BaseModel):
-    """Comprehensive search response separating exact matches and similar suggestions."""
-    items: List[ProductMatchItem] = Field(default_factory=list, description="Paginated matching products list sorted according to requested sort order")
+    """Comprehensive search response separating exact matches, similar suggestions, alternatives, and related items."""
+    items: List[ProductMatchItem] = Field(default_factory=list, description="All matching products sorted according to requested sort order")
     exact_matches: List[ProductMatchItem] = Field(default_factory=list, description="List of items meeting strict exact matching criteria")
-    similar_matches: List[ProductMatchItem] = Field(default_factory=list, description="List of items suggested as related or alternative matches")
-    total: int = Field(default=0, description="Total matching items (exact + similar)")
+    similar_matches: List[ProductMatchItem] = Field(default_factory=list, description="List of items meeting highly similar functional specifications")
+    alternative_matches: List[ProductMatchItem] = Field(default_factory=list, description="List of alternative products (different material grade, capacity, etc.)")
+    related_matches: List[ProductMatchItem] = Field(default_factory=list, description="List of related products in the same category or workflow")
+    total: int = Field(default=0, description="Total matching items across all tiers")
     exact_count: int = Field(default=0, description="Number of exact matches found")
-    similar_count: int = Field(default=0, description="Number of similar suggestions found")
+    similar_count: int = Field(default=0, description="Number of highly similar matches found")
+    alternative_count: int = Field(default=0, description="Number of alternative matches found")
+    related_count: int = Field(default=0, description="Number of related matches found")
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=12, ge=1)
     total_pages: int = Field(default=0, ge=0)
@@ -111,9 +119,15 @@ class ProductMatchRequest(BaseModel):
 class ProductMatchResponse(BaseModel):
     """Detailed matching evaluation result for customer demand requests."""
     matches: List[ProductMatchItem] = Field(default_factory=list)
+    exact_matches: List[ProductMatchItem] = Field(default_factory=list)
+    similar_matches: List[ProductMatchItem] = Field(default_factory=list)
+    alternative_matches: List[ProductMatchItem] = Field(default_factory=list)
+    related_matches: List[ProductMatchItem] = Field(default_factory=list)
     has_exact_match: bool = False
     exact_match_count: int = 0
     similar_match_count: int = 0
-    recommendation: str = Field(default="browse", description="'use_catalog' if exact match exists, 'create_demand' if custom demand is recommended")
+    alternative_match_count: int = 0
+    related_match_count: int = 0
+    recommendation: str = Field(default="browse", description="'use_catalog' | 'view_alternatives' | 'create_demand'")
     create_demand_params: Dict[str, Any] = Field(default_factory=dict, description="Pre-filled query parameters to pass to demand creation flow")
 

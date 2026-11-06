@@ -126,7 +126,7 @@ def test_match_demand_endpoint():
 def test_inactive_products_hidden_from_search():
     """10. Verify inactive / deactivated products are excluded from public search."""
     mock_admin_user = {
-        "id": "admin-search-tester",
+        "id": "a0000000-0000-0000-0000-000000000001",
         "email": "admin@markettwin.com",
         "role": "admin",
         "metadata": {"role": "admin"},

@@ -17,6 +17,7 @@ import {
   Pagination,
   InputNumber,
   Badge,
+  Divider,
 } from 'antd';
 import {
   SearchOutlined,
@@ -47,7 +48,7 @@ export const ProductCatalogue: React.FC = () => {
   const [minPrice, setMinPrice] = useState<number | undefined>(undefined);
   const [maxPrice, setMaxPrice] = useState<number | undefined>(undefined);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Fetch Categories on Mount
@@ -58,7 +59,7 @@ export const ProductCatalogue: React.FC = () => {
       .catch((err) => console.error('Failed to load categories:', err));
   }, []);
 
-  // Fetch Products with current query parameters
+  // Fetch Products
   const loadProducts = useCallback(async () => {
     setLoading(true);
     setErrorMsg(null);
@@ -245,7 +246,7 @@ export const ProductCatalogue: React.FC = () => {
         />
       )}
 
-      {/* 4. Products Grid */}
+      {/* 4. Products Display */}
       {loading ? (
         <Row gutter={[20, 20]}>
           {Array.from({ length: 6 }).map((_, idx) => (
@@ -464,22 +465,38 @@ export const ProductCatalogue: React.FC = () => {
           </div>
         </>
       ) : (
-        <Card style={{ background: '#FFFFFF', textAlign: 'center', padding: '50px 0', borderColor: '#E2E8F0', borderRadius: 10 }}>
+        <Card style={{ background: '#FFFFFF', textAlign: 'center', padding: '52px 20px', borderColor: '#E2E8F0', borderRadius: 10 }}>
           <Empty
             description={
-              <div>
-                <Title level={5} style={{ margin: '12px 0 6px 0', color: '#172B4D' }}>
-                  No products found
+              <div style={{ maxWidth: 560, margin: '0 auto' }}>
+                <Title level={4} style={{ margin: '12px 0 6px 0', color: '#172B4D', fontWeight: 700 }}>
+                  No Products Match Your Requirements
                 </Title>
-                <Text type="secondary" style={{ color: '#64748B' }}>
-                  No active catalog items match your search or filter criteria. Try resetting filters or request a custom demand.
+                <Text type="secondary" style={{ color: '#64748B', fontSize: 13.5, display: 'block' }}>
+                  {searchTerm
+                    ? `No catalogue items match your search for "${searchTerm}". You can create a targeted demand pool to invite verified supplier bids.`
+                    : 'No catalogue items match the specified category and price criteria. Adjust filters or initiate a custom demand.'}
                 </Text>
-                <div style={{ marginTop: 20 }}>
-                  <Button type="primary" icon={<AppstoreAddOutlined />} onClick={() => navigate('/customer/demands/create')}>
-                    Create Custom Demand
+                <div style={{ marginTop: 24, display: 'flex', justifyContent: 'center', gap: 12 }}>
+                  <Button
+                    type="primary"
+                    icon={<AppstoreAddOutlined />}
+                    size="large"
+                    onClick={() =>
+                      navigate(
+                        `/customer/demands/create?product=${encodeURIComponent(
+                          searchTerm
+                        )}&category=${encodeURIComponent(
+                          selectedCategory !== 'all' ? selectedCategory : ''
+                        )}`
+                      )
+                    }
+                    style={{ borderRadius: 8, fontWeight: 600, background: '#1677FF' }}
+                  >
+                    Create Product Demand for "{searchTerm || selectedCategory}"
                   </Button>
-                  <Button style={{ marginLeft: 10 }} onClick={handleResetFilters}>
-                    Clear Filters
+                  <Button size="large" onClick={handleResetFilters} icon={<ClearOutlined />} style={{ borderRadius: 8 }}>
+                    Clear Requirements
                   </Button>
                 </div>
               </div>
