@@ -1,304 +1,240 @@
 # MarketTwin – A Demand-Driven Marketplace
 
-MarketTwin is a demand-driven marketplace architecture where buyers aggregate purchasing intent and merchants submit competitive offers. Customers can search for existing products; if an item is unavailable, they submit demands. The platform automatically identifies similar demands, groups buyers with compatible requirements, and invites verified merchants to submit competitive fulfillment proposals. Customers purchase only after explicitly reviewing and approving the winning offer.
+MarketTwin is a demand-driven marketplace where buyers aggregate purchasing intent and merchants submit competitive offers. Customers can search for products; if an item is unavailable, they submit demands. The platform identifies similar demands, groups compatible buyers, and invites verified merchants to submit competitive fulfillment proposals. Customers purchase only after explicitly reviewing and approving the winning offer.
 
----
+## System Architecture & Roles
 
-## 🏛️ System Architecture & Roles
+1. **Customer**
+   - Searches catalog and creates product demands.
+   - Joins demand groups to unlock bulk pricing.
+   - Compares merchant offers and approves purchases explicitly.
 
-MarketTwin is architected around three distinct user roles:
+2. **Merchant**
+   - Views grouped demand pools.
+   - Submits competitive offers.
+   - Fulfills approved orders.
 
-1. **Customer**:
-   - Searches catalog for existing products.
-   - Creates custom product demands when items are not listed.
-   - Automatically grouped with other customers sharing similar product requirements to unlock bulk merchant pricing.
-   - Compares eligible offers and purchases **only after explicit approval** of the final merchant offer.
-
-2. **Merchant**:
-   - Accesses grouped customer demand pools.
-   - Submits competitive pricing, quantity discounts, and fulfillment terms.
-   - Fulfills demand orders upon customer group approval.
-
-3. **Admin**:
-   - Platform governance, category management, and demand quality oversight.
+3. **Admin**
+   - Platform governance, category management, demand oversight.
    - Merchant accreditation and dispute resolution.
-   - Analytics monitoring across demands, offers, and transaction pipelines.
+   - Analytics across demands, offers, and transactions.
 
----
-
-## 💻 Technology Stack
+## Technology Stack
 
 ### Frontend
-- **React.js 18** + **TypeScript**
-- **Ant Design (AntD) 5.x** (enterprise-grade UI library in professional Light Theme)
-- **@ant-design/icons** (consistent iconography)
-- **Vite 6** (lightning-fast bundler and HMR)
-- **Tailwind CSS 3** (configured for Light Theme palette: #FFFFFF, #F5F7FA, #172B4D, #1677FF)
-- **React Router 6** (client-side routing)
-- **Axios** (configured HTTP client with base URL, request/response interceptors, and error handling)
+- React 18 + TypeScript
+- Vite 6
+- Tailwind CSS 3
+- React Router 6
+- Axios
+- Ant Design 5
+- Supabase JS client
 
 ### Backend
-- **Python 3.10+**
-- **FastAPI** (high-performance asynchronous REST API framework)
-- **Pydantic v2** & **pydantic-settings** (type validation and environment settings management)
-- **Uvicorn** (ASGI server)
+- Python 3.10+
+- FastAPI
+- Pydantic v2
+- Uvicorn
+- Supabase Python client
+- Groq SDK (optional AI features)
 
-### Database & Cloud Services
-- **Supabase PostgreSQL** (relational data store)
-- **Supabase Authentication** (secure user sessions and role claims)
-- **Supabase Storage** (product images and demand specifications)
-- **Supabase Realtime** (live group updates and offer alerts)
+### Database & Cloud
+- Supabase PostgreSQL
+- Supabase Authentication
+- Supabase Storage
+- Supabase Realtime
 
----
-
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 markettwin/
-├── .gitignore                   # Root gitignore protecting secrets & build artifacts
-├── README.md                    # Project documentation & developer guide
-├── backend/                     # Python FastAPI Backend
-│   ├── .env                     # Local environment file (git-ignored)
-│   ├── .env.example             # Environment variable template
-│   ├── .gitignore               # Backend gitignore
-│   ├── requirements.txt         # Python package dependencies
+├── README.md
+├── docs/
+│   └── DATABASE.md
+├── backend/
+│   ├── .env.example
+│   ├── requirements.txt
 │   ├── app/
-│   │   ├── __init__.py          # App version and metadata
-│   │   ├── main.py              # FastAPI application factory, CORS, exception handlers
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   └── v1/
-│   │   │       ├── __init__.py
-│   │   │       ├── router.py    # Aggregator for v1 route endpoints
-│   │   │       └── endpoints/
-│   │   │           ├── __init__.py
-│   │   │           └── health.py # Health diagnostic endpoints (/health, /api/v1/health)
+│   │   ├── main.py
+│   │   ├── api/v1/
 │   │   ├── core/
-│   │   │   ├── __init__.py
-│   │   │   ├── config.py        # Pydantic BaseSettings (.env loading & validation)
-│   │   │   ├── exceptions.py    # Domain exceptions & standardized error handlers
-│   │   │   └── supabase.py      # Supabase client wrapper & connectivity checker
 │   │   ├── schemas/
-│   │   │   ├── __init__.py
-│   │   │   ├── common.py        # Generic API envelopes and UserRole enum
-│   │   │   └── health.py        # HealthCheckResponse & ServiceStatus models
 │   │   └── services/
-│   │       └── __init__.py      # Business logic services (demands, offers, matching)
+│   ├── sql/migrations/
 │   └── tests/
-│       ├── __init__.py
-│       └── test_health.py       # API & health check test suite
-└── frontend/                    # React + TypeScript + Vite Frontend
-    ├── .env                     # Frontend environment variables (git-ignored)
-    ├── .env.example             # Frontend environment template
-    ├── .gitignore               # Frontend gitignore
-    ├── index.html               # Main HTML entrypoint
-    ├── package.json             # NPM dependencies & scripts
-    ├── postcss.config.js        # PostCSS configuration for Tailwind
-    ├── tailwind.config.js       # Tailwind CSS theme extension
-    ├── tsconfig.json            # TypeScript compiler configuration
-    ├── tsconfig.node.json       # Node TypeScript configuration for Vite
-    ├── vite.config.ts           # Vite bundler configuration & path aliases
-    ├── public/
-    │   └── vite.svg
+└── frontend/
+    ├── .env.example
+    ├── package.json
+    ├── vite.config.ts
+    ├── tailwind.config.js
     └── src/
-        ├── App.tsx              # Root React component with RouterProvider
-        ├── index.css            # Tailwind directives and base layer styles
-        ├── main.tsx             # DOM mount entry point
-        ├── vite-env.d.ts        # Vite environment types declaration
         ├── api/
-        │   ├── axiosClient.ts   # Intercepted Axios instance with base URL & error handler
-        │   └── healthApi.ts     # Health check API methods
         ├── components/
-        │   ├── common/
-        │   │   ├── Navbar.tsx   # Top navigation with live backend connection badge
-        │   │   └── Footer.tsx   # App footer
-        │   └── layout/
-        │       └── RootLayout.tsx # Responsive root shell layout
-        ├── config/
-        │   ├── env.ts           # Environment variable validation & safe accessors
-        │   └── supabaseClient.ts # Supabase client initializer (public anon key only)
+        ├── context/
         ├── pages/
-        │   ├── HomePage.tsx     # Overview dashboard, live health ping tool, role preview
-        │   └── NotFoundPage.tsx # 404 fallback page
-        ├── router/
-        │   └── index.tsx        # React Router browser router configuration
-        └── types/
-            └── index.ts         # TypeScript interfaces (HealthResponse, Roles, etc.)
+        ├── services/
+        └── router/
 ```
 
----
-
-## 🚀 Getting Started
-
-Frontend and backend run completely independently. Follow the steps below to set up and launch both services.
+## Getting Started
 
 ### Prerequisites
-- **Node.js**: v18+ (v20+ recommended)
-- **npm**: v9+
-- **Python**: v3.10+
-- **Git**
+- Node.js v18+ (v20+ recommended)
+- npm v9+
+- Python 3.10+
+- Git
 
----
+### Backend Setup
 
-### 1. Backend Setup (FastAPI)
+```bash
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1   # Windows
+# source .venv/bin/activate     # macOS/Linux
+pip install -r requirements.txt
+copy .env.example .env          # Windows
+# cp .env.example .env          # macOS/Linux
+```
 
-1. Open a terminal and navigate to the `backend` directory:
-   ```bash
-   cd backend
-   ```
+Edit `backend/.env` with your Supabase credentials:
 
-2. Create and activate a Python virtual environment:
-   - **Windows (PowerShell)**:
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-   - **macOS / Linux**:
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
+```env
+PROJECT_NAME="MarketTwin API"
+ENVIRONMENT="development"
+DEBUG=True
+API_V1_STR="/api/v1"
+ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
 
-3. Install required backend dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+SUPABASE_URL="https://your-project-id.supabase.co"
+SUPABASE_KEY="your-anon-key"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+SUPABASE_JWT_SECRET="your-jwt-secret"
+FRONTEND_URL="http://localhost:5173"
 
-4. Configure environment variables:
-   Copy `.env.example` to `.env`:
-   - **Windows**: `copy .env.example .env`
-   - **macOS / Linux**: `cp .env.example .env`
+ADMIN_EMAIL="admin@markettwin.com"
+ADMIN_PASSWORD="your-secure-admin-password"
 
-   Edit `.env` if you have active Supabase project credentials:
-   ```env
-   PROJECT_NAME="MarketTwin API"
-   ENVIRONMENT="development"
-   DEBUG=True
-   API_V1_STR="/api/v1"
-   ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+GROQ_API_KEY="your-groq-api-key"
 
-   SUPABASE_URL="https://your-project-id.supabase.co"
-   SUPABASE_KEY="your-anon-or-service-role-key"
-   SUPABASE_SERVICE_ROLE_KEY="your-service-role-secret-key"
-   ```
+PAYPAL_CLIENT_ID="your-paypal-client-id"
+PAYPAL_CLIENT_SECRET="your-paypal-client-secret"
+PAYPAL_MODE="sandbox"
+```
 
-5. Start the FastAPI development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-   The backend will be available at:
-   - **Base URL**: [http://localhost:8000](http://localhost:8000)
-   - **Health Check Endpoint**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
-   - **Interactive API Documentation (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-   - **Alternative Documentation (ReDoc)**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+Run migrations:
 
----
+```bash
+python -c "import psycopg2; print('ok')"
+# Apply SQL files in backend/sql/migrations in order
+```
 
-### 2. Frontend Setup (React + Vite)
+Start backend:
 
-1. Open a new terminal and navigate to the `frontend` directory:
-   ```bash
-   cd frontend
-   ```
+```bash
+uvicorn app.main:app --reload --port 8000
+```
 
-2. Install frontend dependencies:
-   ```bash
-   npm install
-   ```
+Backend URLs:
+- Base: http://localhost:8000
+- Health: http://localhost:8000/api/v1/health
+- Docs: http://localhost:8000/docs
 
-3. Configure environment variables:
-   Copy `.env.example` to `.env`:
-   - **Windows**: `copy .env.example .env`
-   - **macOS / Linux**: `cp .env.example .env`
+### Frontend Setup
 
-   Edit `.env` as needed:
-   ```env
-   VITE_API_BASE_URL=http://localhost:8000
-   VITE_SUPABASE_URL=https://your-project-id.supabase.co
-   VITE_SUPABASE_ANON_KEY=your-anon-public-key
-   ```
+```bash
+cd frontend
+npm install
+copy .env.example .env          # Windows
+# cp .env.example .env          # macOS/Linux
+```
 
-4. Start the Vite development server:
-   ```bash
-   npm run dev
-   ```
-   The frontend will be available at:
-   - **Frontend App**: [http://localhost:5173](http://localhost:5173)
+Edit `frontend/.env`:
 
-5. (Optional) Build for production:
-   ```bash
-   npm run build
-   ```
+```env
+VITE_API_BASE_URL=http://localhost:8000
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
 
----
+Start frontend:
 
-## 🔒 Security & Environment Architecture
+```bash
+npm run dev
+```
 
-- **Zero Hardcoded Secrets**: Secrets and keys are strictly read from environment variables.
-- **Frontend vs Backend Key Isolation**:
-  - The frontend **only** receives `VITE_SUPABASE_ANON_KEY`, intended for public browser consumption behind Row-Level Security (RLS).
-  - The privileged `SUPABASE_SERVICE_ROLE_KEY` is exclusively kept on the backend.
-- **CORS Configuration**: FastAPI is restricted by default to allowed frontend origins (`http://localhost:5173`).
-- **Standardized Error Handling**: FastAPI uses global exception interceptors that return uniform JSON payloads without leaking internal server stack traces to clients.
+Frontend URL: http://localhost:5173
 
----
+Production build:
 
-## 🔍 Verifying Phase 1
+```bash
+npm run build
+```
 
-1. **Backend Health Check**:
-   ```bash
-   curl http://localhost:8000/api/v1/health
-   ```
-   Expected response:
-   ```json
-   {
-     "status": "ok",
-     "timestamp": "2026-11-03T13:04:09.445227+00:00",
-     "service": "MarketTwin API",
-     "version": "0.1.0",
-     "environment": "development",
-     "services": {
-       "database": {
-         "status": "unconfigured",
-         "message": "Supabase URL and API keys are placeholder/unconfigured.",
-         "latency_ms": null
-       }
-     }
-   }
-   ```
+## Database Setup
 
-2. **Frontend UI**:
-   - Open [http://localhost:5173](http://localhost:5173).
-   - The top navigation bar indicates live backend connection status (**Connected** / **Disconnected**).
-   - Click the interactive **Ping API** button to test the live Axios communication with FastAPI.
-   - Inspect the three configured user roles (**Customer**, **Merchant**, **Admin**).
+SQL migrations are located in `backend/sql/migrations`. Apply them in order to your Supabase PostgreSQL database.
 
----
+See `docs/DATABASE.md` for:
+- Table relationships
+- RLS policies
+- Storage buckets
+- Realtime configuration
+- Environment setup
 
-## 🗺️ Project Development Roadmap
+## Authentication
 
-- [x] **Phase 1: Project Foundation & Architecture** (Current)
-  - Monorepo folder layout & configuration
-  - React + TypeScript + Vite + Tailwind CSS frontend
-  - Python FastAPI + Pydantic backend with modular structure
-  - Axios API communication client & health-check endpoint
-  - Supabase client integration setup with key isolation
-  - Error boundaries, type definitions, and documentation
-- [ ] **Phase 2: Authentication & Role-Based Access Control (RBAC)**
-  - Supabase Auth integration for Customer, Merchant, Admin
-  - Protected routes and session management
-- [ ] **Phase 3: Product Catalog & Demand Creation**
-  - Searchable existing products catalog
-  - Customer demand submission form with specifications
-- [ ] **Phase 4: Demand Grouping & Aggregation Engine**
-  - Clustering similar customer demands
-  - Threshold triggers for merchant notifications
-- [ ] **Phase 5: Merchant Offers & Competitive Bidding**
-  - Merchant dashboard for viewing grouped demands
-  - Offer submission with tiered pricing and fulfillment timelines
-- [ ] **Phase 6: Customer Offer Comparison & Explicit Approval**
-  - Offer comparison matrix
-  - Customer approval gating and order finalization
-- [ ] **Phase 7: Realtime Notifications & Deployment**
-  - Supabase Realtime alerts for offers and group milestones
-  - CI/CD pipeline and production deployment
+- Supabase Auth handles registration, login, password reset, and sessions.
+- Frontend uses only the anon key.
+- Backend verifies JWTs and enforces roles.
+- Admin accounts are provisioned securely through backend-controlled processes.
+- Role-based route protection is enforced in frontend and backend.
+
+## Core Features
+
+- Product catalogue and search
+- Customer demand creation
+- Demand requirement extraction and normalization
+- Similar demand grouping
+- Merchant bidding and offer submission
+- Offer validation and customer selection
+- Order creation and PayPal payment foundation
+- Order fulfillment and delivery tracking
+- Admin governance and analytics
+
+## Security
+
+- No hardcoded secrets in frontend.
+- Service-role key is backend-only.
+- RLS enabled on application tables.
+- Backend validates all protected operations.
+- PayPal credentials are server-side only.
+
+## Testing
+
+### Backend
+
+```bash
+cd backend
+.\.venv\Scripts\python.exe -m pytest -v
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm run build
+```
+
+## Deployment Notes
+
+- Use production Supabase project and apply all migrations.
+- Configure environment variables for production.
+- Enable Supabase SMTP for email delivery.
+- Use PayPal sandbox for testing before live credentials.
+- Deploy frontend as SPA with routing fallback.
+- Deploy backend with Uvicorn/Gunicorn behind HTTPS.
+- Verify health checks, RLS, and payment flows before launch.
+
+## License
+
+This project is provided for development and educational use. Add your preferred license as needed.
