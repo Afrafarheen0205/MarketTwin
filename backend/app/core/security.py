@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -5,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.supabase import get_supabase_client
 
+logger = logging.getLogger("markettwin.security")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -30,7 +32,7 @@ def get_current_user(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or expired authentication token: {exc}",
+            detail="Invalid or expired authentication token.",
         ) from exc
 
     user = getattr(response, "user", None)
@@ -41,28 +43,58 @@ def get_current_user(
         )
 
     metadata = getattr(user, "user_metadata", None) or {}
-    role = metadata.get("role", "customer")
+    user_id = str(getattr(user, "id", ""))
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unable to resolve authenticated user.",
+        )
 
-    # Prefer trusted role from profiles table when available.
-    client = get_supabase_client()
+    try:
+        profile_res = (
+            client.table("profiles")
+            .select("role")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("Unable to resolve the authenticated user's profile role.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Account role verification is temporarily unavailable.",
+        ) from exc
+
+    profile = getattr(profile_res, "data", None)
+    role = profile.get("role") if isinstance(profile, dict) else None
+    if role not in {"customer", "merchant", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid account role could not be verified.",
+        )
+
     profile_status = None
-    if client is not None:
+    if role == "merchant":
         try:
-            profile_res = client.table("profiles").select("role").eq("id", str(getattr(user, "id", ""))).single().execute()
-            if profile_res.data:
-                role = profile_res.data.get("role", role)
-        except Exception:
-            pass
-        if role == "merchant":
-            try:
-                merch_res = client.table("merchant_profiles").select("status").eq("id", str(getattr(user, "id", ""))).single().execute()
-                if merch_res.data:
-                    profile_status = merch_res.data.get("status")
-            except Exception:
-                pass
+            merch_res = (
+                client.table("merchant_profiles")
+                .select("status")
+                .eq("id", user_id)
+                .single()
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("Unable to resolve the authenticated merchant's approval status.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Merchant account verification is temporarily unavailable.",
+            ) from exc
+        merchant_profile = getattr(merch_res, "data", None)
+        if isinstance(merchant_profile, dict):
+            profile_status = merchant_profile.get("status")
 
     return {
-        "id": str(getattr(user, "id", "")),
+        "id": user_id,
         "email": getattr(user, "email", None),
         "email_confirmed_at": getattr(user, "email_confirmed_at", None),
         "role": role,
@@ -75,7 +107,7 @@ def require_roles(*allowed_roles: str):
     """Factory returning a dependency that enforces role-based access."""
 
     def _checker(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-        role = current_user.get("role", "customer")
+        role = current_user.get("role")
         if role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

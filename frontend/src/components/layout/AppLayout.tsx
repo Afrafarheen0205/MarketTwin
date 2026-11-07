@@ -98,7 +98,7 @@ export const AppLayout: React.FC = () => {
     {
       key: '/customer/dashboard',
       icon: <DashboardOutlined />,
-      label: 'Home Dashboard',
+      label: 'Home',
     },
     {
       key: 'catalogue-group',
@@ -529,7 +529,7 @@ export const AppLayout: React.FC = () => {
           style={{
             background: '#FFFFFF',
             borderBottom: '1px solid #E2E8F0',
-            padding: '0 32px',
+            padding: isHomePage ? '0 24px' : '0 32px',
             height: 72,
             display: 'flex',
             alignItems: 'center',
@@ -539,44 +539,37 @@ export const AppLayout: React.FC = () => {
             zIndex: 90,
           }}
         >
-          {/* Left: Brand Logo on Home / Landing Page OR Sidebar Collapse Toggle on Internal Pages */}
+          {/* Left: Home brand or Sidebar Collapse Toggle on Internal Pages */}
           <Space orientation="horizontal" size={16} align="center">
             {isHomePage ? (
               <div
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  cursor: 'pointer',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  maxWidth: '52vw',
                 }}
-                onClick={() => navigate('/')}
               >
-                <div
+                <span
                   style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 12,
-                    background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#FFFFFF',
+                    color: '#0F172A',
+                    fontSize: 19,
                     fontWeight: 800,
-                    fontSize: 17,
-                    boxShadow: '0 2px 10px rgba(79, 70, 229, 0.35)',
-                    flexShrink: 0,
+                    lineHeight: 1.15,
                   }}
                 >
-                  MT
-                </div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 18, color: '#0F172A', lineHeight: 1.2 }}>
-                    Market<span style={{ color: '#4F46E5' }}>Twin</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, letterSpacing: 0.5 }}>
-                    DEMAND-DRIVEN B2B
-                  </div>
-                </div>
+                  MarketTwin
+                </span>
+                <span
+                  style={{
+                    color: '#64748B',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  AI-Powered Product Discovery for Businesses
+                </span>
               </div>
             ) : (
               user && (
@@ -590,36 +583,37 @@ export const AppLayout: React.FC = () => {
             )}
           </Space>
 
-          {/* Center: Global Search Input matching reference */}
-          <div style={{ flex: '0 1 460px', margin: '0 20px' }} className="hidden md:block">
-            <Input
-              placeholder="Search across the app..."
-              prefix={<SearchOutlined style={{ color: '#94A3B8', marginRight: 8, fontSize: 15 }} />}
-              suffix={
-                <span
-                  style={{
-                    fontSize: 11.5,
-                    backgroundColor: '#F1F5F9',
-                    color: '#64748B',
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #E2E8F0',
-                    fontWeight: 600,
-                  }}
-                >
-                  ⌘/
-                </span>
-              }
-              style={{
-                borderRadius: 24,
-                backgroundColor: '#F8FAFC',
-                border: '1px solid #E2E8F0',
-                height: 42,
-                fontSize: 14,
-                padding: '0 16px',
-              }}
-            />
-          </div>
+          {!isHomePage && (
+            <div style={{ flex: '0 1 460px', margin: '0 20px' }} className="hidden md:block">
+              <Input
+                placeholder="Search across the app..."
+                prefix={<SearchOutlined style={{ color: '#94A3B8', marginRight: 8, fontSize: 15 }} />}
+                suffix={
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      backgroundColor: '#F1F5F9',
+                      color: '#64748B',
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #E2E8F0',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⌘/
+                  </span>
+                }
+                style={{
+                  borderRadius: 24,
+                  backgroundColor: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  height: 42,
+                  fontSize: 14,
+                  padding: '0 16px',
+                }}
+              />
+            </div>
+          )}
 
           {/* Right: Switch Role + Backend Indicator + Bell + User Icon + Avatar + Account ▾ */}
           <Space orientation="horizontal" size={14} align="center">

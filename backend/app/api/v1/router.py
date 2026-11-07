@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import admin, admin_products, analytics, auth, bidding, demands, fulfillment, grouping, health, offer_selection, orders, products, requirements, users
+from app.api.v1.endpoints import admin, admin_products, ai, analytics, auth, bidding, demands, fulfillment, grouping, health, offer_selection, orders, products, requirements, users
 
 api_router = APIRouter()
 
@@ -11,6 +11,7 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Administration"]
 api_router.include_router(products.router, prefix="/products", tags=["Product Catalogue"])
 api_router.include_router(demands.router, prefix="/customer/demands", tags=["Customer Demands"])
 api_router.include_router(requirements.router, tags=["Requirement Extraction"])
+api_router.include_router(ai.router, prefix="/ai", tags=["AI Product Discovery"])
 api_router.include_router(grouping.router, tags=["Demand Grouping"])
 api_router.include_router(bidding.router, tags=["Merchant Bidding"])
 api_router.include_router(offer_selection.router, tags=["Offer Validation and Selection"])

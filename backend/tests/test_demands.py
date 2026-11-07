@@ -4,7 +4,17 @@ from app.main import app
 
 def test_create_demand_requires_auth():
     client = TestClient(app)
-    response = client.post("/api/v1/customer/demands", json={"product_name": "Test", "quantity": 1, "unit": "units"})
+    response = client.post(
+        "/api/v1/customer/demands",
+        json={
+            "product_name": "Test",
+            "category": "Electronics",
+            "quantity": 1,
+            "unit": "units",
+            "minimum_target_unit_price": 10,
+            "maximum_target_unit_price": 20,
+        },
+    )
     assert response.status_code == 401
 
 

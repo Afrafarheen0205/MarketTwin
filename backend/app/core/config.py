@@ -43,10 +43,43 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = Field(default="", description="Supabase anon public key")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(default="", description="Supabase service role secret key")
     SUPABASE_JWT_SECRET: str = Field(default="", description="Supabase JWT secret for token verification")
+    DEMAND_PERSISTENCE_ENABLED: bool = Field(
+        default=False,
+        description="Enable demand submission only after transactional schema verification.",
+    )
+    DEMAND_ANALYSIS_ENABLED: bool = Field(
+        default=False,
+        description="Enable cross-customer demand analysis only after privacy verification.",
+    )
     FRONTEND_URL: str = Field(default="http://localhost:5173", description="Frontend base URL for auth redirects")
     ADMIN_EMAIL: str = Field(default="", description="Admin login email")
     ADMIN_PASSWORD: str = Field(default="", description="Admin login password")
     GROQ_API_KEY: str = Field(default="", description="Groq API key for AI features")
+    AI_PROVIDER: str = Field(default="ollama", description="AI provider used for requirement conversations")
+    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama API base URL")
+    OLLAMA_MODEL: str = Field(default="qwen3:4b-instruct-2507-q4_K_M", description="Ollama model used for AI features")
+    BUYORA_CATALOGUE_API_URL: str = Field(
+        default="https://buyora-backend-0kae.onrender.com/api/products",
+        description="Buyora catalogue API endpoint used for product matching",
+    )
+    CATALOGUE_API_TIMEOUT_SECONDS: float = Field(
+        default=20.0,
+        gt=0,
+        le=120,
+        description="Timeout for Buyora catalogue requests",
+    )
+    CATALOGUE_API_TOTAL_TIMEOUT_SECONDS: float = Field(
+        default=24.0,
+        gt=0,
+        le=180,
+        description="Maximum time allowed to retrieve all Buyora catalogue pages",
+    )
+    CATALOGUE_API_MAX_RETRIES: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Maximum retries for transient Buyora catalogue failures",
+    )
     PAYPAL_CLIENT_ID: str = Field(default="", description="PayPal client ID")
     PAYPAL_CLIENT_SECRET: str = Field(default="", description="PayPal client secret")
     PAYPAL_MODE: str = Field(default="sandbox", description="PayPal mode: sandbox or live")

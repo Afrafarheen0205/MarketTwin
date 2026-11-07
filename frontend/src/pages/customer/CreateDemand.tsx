@@ -1,81 +1,517 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, Steps, Form, Input, InputNumber, Select, DatePicker, Button, Row, Col, Typography, Space, Alert, Result, Divider, Tag, Radio } from 'antd';
-import { AppstoreAddOutlined, DollarOutlined, TeamOutlined, CheckCircleOutlined, ThunderboltOutlined, ArrowLeftOutlined, ArrowRightOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  DatePicker,
+  Divider,
+  Form,
+  Input,
+  InputNumber,
+  Result,
+  Row,
+  Select,
+  Space,
+  Steps,
+  Typography,
+} from 'antd';
+import {
+  AppstoreAddOutlined,
+  ArrowLeftOutlined,
+  ArrowRightOutlined,
+  CheckCircleOutlined,
+  DollarOutlined,
+  MinusCircleOutlined,
+  PlusOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { supabase } from '../../services/supabase';
-import demandApi from '../../api/demandApi';
+import demandApi, { DemandRecord, DemandSpecification } from '../../api/demandApi';
+import {
+  clearReviewedDemandDraft,
+  loadReviewedDemandDraft,
+  type ReviewedDemandDraft,
+} from '../../utils/reviewedDemandDraft';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+const SUBMISSION_ID_KEY = 'markettwin_demand_submission_id_v1';
+
+interface EditableSpecification {
+  name: string;
+  value: string;
+}
+
+const toDemandSpecifications = (
+  mandatory: EditableSpecification[] = [],
+  optional: EditableSpecification[] = []
+): DemandSpecification[] => [
+  ...mandatory.map(({ name, value }) => ({
+    name: name.trim(),
+    value: value.trim(),
+    mandatory: true,
+  })),
+  ...optional.map(({ name, value }) => ({
+    name: name.trim(),
+    value: value.trim(),
+    mandatory: false,
+  })),
+].filter(({ name, value }) => name && value);
+
+const parseAmount = (value?: string): number | undefined => {
+  if (
+    !value ||
+    /\b(?:under|below|up to|at most|less than|more than|over|above|between|from|to|about|around|approximately|approx)\b|[-–—]/i.test(value)
+  ) {
+    return undefined;
+  }
+  const matches = value.match(/\d[\d,]*(?:\.\d+)?/g);
+  if (!matches || matches.length !== 1) return undefined;
+  const parsed = Number(matches[0].replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parseQuantityUnit = (value?: string): string | undefined => {
+  const match = value?.match(/^\s*(?:quantity\s*)?[\d,]+(?:\.\d+)?\s+(.+?)\s*$/i);
+  return match?.[1]?.trim() || undefined;
+};
+
+const firstValue = (
+  values: Record<string, string>,
+  keys: string[]
+): string | undefined => {
+  const entry = Object.entries(values).find(([key]) =>
+    keys.includes(key.toLowerCase())
+  );
+  return entry?.[1];
+};
+
+const draftFormValues = (
+  reviewed: ReviewedDemandDraft | null,
+  manualDefaults: {
+    product: string;
+    category: string;
+    description: string;
+  },
+  isAIDraftFlow: boolean
+) => {
+  const draft = reviewed?.draft;
+  if (!draft) {
+    return {
+      title: manualDefaults.product,
+      category: isAIDraftFlow ? undefined : manualDefaults.category,
+      targetQuantity: undefined,
+      waitingPeriodDays: undefined,
+      unit: '',
+      minimumTargetPrice: undefined,
+      maximumTargetPrice: undefined,
+      currency: '',
+      description: manualDefaults.description,
+      additionalRequirements: '',
+      mandatorySpecifications: [],
+      optionalSpecifications: [],
+    };
+  }
+
+  const mandatory = draft.mandatory_requirements;
+  const commercial = draft.commercial_constraints;
+  const location = firstValue(draft.delivery_constraints, [
+    'location',
+    'destination',
+    'delivery_location',
+  ]);
+  const deliveryDuration = firstValue(draft.delivery_constraints, [
+    'duration',
+    'delivery_duration',
+    'expected_delivery_duration',
+    'expected_lead_time',
+    'lead_time',
+  ]);
+  const separateDeliveryKeys = [
+    'location',
+    'destination',
+    'delivery_location',
+    'duration',
+    'delivery_duration',
+    'expected_delivery_duration',
+    'expected_lead_time',
+    'lead_time',
+  ];
+  const deliveryRequirements = Object.fromEntries(
+    Object.entries(draft.delivery_constraints).filter(
+      ([key]) => !separateDeliveryKeys.includes(key.toLowerCase())
+    )
+  );
+  const targetQuantity = parseAmount(commercial.quantity);
+  const parsedDeliveryDays = deliveryDuration?.match(
+    /^\s*(?:within\s+)?(\d+)\s+days?\s*$/i
+  );
+  const waitingPeriodDays = parsedDeliveryDays
+    ? Number(parsedDeliveryDays[1])
+    : undefined;
+  const minimumTargetPrice = parseAmount(commercial.minimum_target_unit_price);
+  const maximumTargetPrice = parseAmount(commercial.maximum_target_unit_price);
+  const knownCommercialKeys = new Set([
+    'quantity',
+    'unit',
+    'minimum_target_unit_price',
+    'maximum_target_unit_price',
+    'currency',
+    'additional_requirements',
+  ]);
+  const supplementaryDetails = Object.entries(commercial)
+    .filter(([key]) => !knownCommercialKeys.has(key.toLowerCase()))
+    .map(([key, value]) => `${key}: ${value}`);
+  if (
+    draft.product_type &&
+    draft.product_name &&
+    draft.product_type.toLowerCase() !== draft.product_name.toLowerCase()
+  ) {
+    supplementaryDetails.unshift(`Product type: ${draft.product_type}`);
+  }
+  if (commercial.quantity && targetQuantity === undefined) {
+    supplementaryDetails.push(`Purchase quantity detail: ${commercial.quantity}`);
+  }
+  if (commercial.minimum_target_unit_price && minimumTargetPrice === undefined) {
+    supplementaryDetails.push(`Minimum target unit price detail: ${commercial.minimum_target_unit_price}`);
+  }
+  if (commercial.maximum_target_unit_price && maximumTargetPrice === undefined) {
+    supplementaryDetails.push(`Maximum target unit price detail: ${commercial.maximum_target_unit_price}`);
+  }
+  if (commercial.budget) {
+    supplementaryDetails.push(`Customer-stated budget: ${commercial.budget}`);
+  }
+
+  return {
+    title: draft.product_name || draft.product_type || '',
+    category: draft.category || undefined,
+    description: reviewed.originalRequirement,
+    brand: firstValue(mandatory, ['brand', 'preferred_brand']),
+    model: firstValue(mandatory, ['model', 'model_number']),
+    mandatorySpecifications: Object.entries(mandatory)
+      .filter(([key]) => !['brand', 'preferred_brand', 'model', 'model_number'].includes(key.toLowerCase()))
+      .map(([name, value]) => ({ name, value })),
+    optionalSpecifications: Object.entries(draft.optional_preferences).map(
+      ([name, value]) => ({ name, value })
+    ),
+    targetQuantity,
+    waitingPeriodDays,
+    unit: commercial.unit || parseQuantityUnit(commercial.quantity) || '',
+    minimumTargetPrice,
+    maximumTargetPrice,
+    currency: commercial.currency || '',
+    deliveryRequirementsText: Object.entries(deliveryRequirements)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('\n'),
+    deliveryDuration: deliveryDuration || '',
+    deliveryLocation: location || '',
+    additionalRequirements: [
+      commercial.additional_requirements,
+      ...supplementaryDetails,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  };
+};
 
 export const CreateDemand: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, role, loading: authLoading } = useAuth();
   const [searchParams] = useSearchParams();
-  const initialProduct = searchParams.get('product') || searchParams.get('search') || searchParams.get('q') || '';
-  const initialCategory = searchParams.get('category') || 'Industrial Equipment';
-  const initialPrice = Number(searchParams.get('price')) || 200;
-  const initialDesc = searchParams.get('desc') || searchParams.get('description') || (initialProduct ? `Custom specifications and quality requirements for ${initialProduct}` : '');
+  const [reviewedDraft] = useState(loadReviewedDemandDraft);
+  const isAIDraftFlow = searchParams.get('source') === 'ai';
+  const initialProduct =
+    searchParams.get('product') ||
+    searchParams.get('search') ||
+    searchParams.get('q') ||
+    '';
+  const initialCategory =
+    searchParams.get('category') || 'Industrial Equipment';
+  const initialDesc =
+    searchParams.get('desc') ||
+    searchParams.get('description') ||
+    (initialProduct
+      ? `Custom specifications and quality requirements for ${initialProduct}`
+      : '');
 
   const [currentStep, setCurrentStep] = useState(0);
   const [form] = Form.useForm();
   const [submitted, setSubmitted] = useState(false);
-  const [createdDemand, setCreatedDemand] = useState<any>({});
+  const [createdDemand, setCreatedDemand] = useState<DemandRecord | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const submissionLock = useRef(false);
+  const submissionId = useRef<string | null>(null);
+
+  const initialValues = draftFormValues(reviewedDraft, {
+    product: initialProduct,
+    category: initialCategory,
+    description: initialDesc,
+  }, isAIDraftFlow);
+  const initialCategoryValue = initialValues.category;
+  const formInitialValues = {
+    ...initialValues,
+    category: initialCategoryValue ? [initialCategoryValue] : undefined,
+  };
+  const mandatoryRequirements =
+    reviewedDraft?.draft.mandatory_requirements ?? {};
+  const brandIsMandatory = Boolean(
+    firstValue(mandatoryRequirements, ['brand', 'preferred_brand'])
+  );
+  const modelIsMandatory = Boolean(
+    firstValue(mandatoryRequirements, ['model', 'model_number'])
+  );
+  const deliveryConstraints = reviewedDraft?.draft.delivery_constraints ?? {};
+  const hasDeliveryLocation = Boolean(
+    firstValue(deliveryConstraints, ['location', 'destination', 'delivery_location'])
+  );
+  const hasOtherDeliveryConstraints = Object.keys(deliveryConstraints).some(
+    (key) =>
+      ![
+        'location',
+        'destination',
+        'delivery_location',
+        'duration',
+        'delivery_duration',
+        'expected_delivery_duration',
+        'expected_lead_time',
+        'lead_time',
+      ].includes(key.toLowerCase())
+  );
+  const hasDeliveryDuration = Boolean(
+    firstValue(deliveryConstraints, [
+      'duration',
+      'delivery_duration',
+      'expected_delivery_duration',
+      'expected_lead_time',
+      'lead_time',
+    ])
+  );
 
   const handleNext = async () => {
     try {
-      await form.validateFields();
       if (currentStep < 2) {
-        setCurrentStep((prev) => prev + 1);
-      } else {
-        const values = form.getFieldsValue();
-        if (!supabase || !user) { return; }
-        setLoading(true);
-        const payload = {
-          product_name: values.title,
-          category: values.category,
-          description: values.description,
-          quantity: values.targetQuantity,
-          unit: 'units',
-          target_unit_price: values.targetPrice,
-          maximum_budget: values.targetQuantity * values.targetPrice,
-          currency: 'USD',
-          required_delivery_date: values.deadline ? values.deadline.format('YYYY-MM-DD') : null,
-          expected_lead_time: values.leadTimeWeeks || 2,
-          delivery_address: { shipping_terms: values.shippingTerms },
-          additional_requirements: values.description,
-        };
-        try {
-          const data = await demandApi.createDemand(payload);
-          setCreatedDemand(data);
-          setSubmitted(true);
-        } catch (e) {
-          // ignore
-        } finally {
-          setLoading(false);
-        }
+        await form.validateFields();
+        setCurrentStep((previous) => previous + 1);
         return;
       }
+
+      await form.validateFields();
+      if (isAIDraftFlow && !reviewedDraft) {
+        setSubmissionError('The reviewed AI requirement is missing or expired. Review it again before creating a demand.');
+        return;
+      }
+      if (!user || role !== 'customer') {
+        navigate('/login?role=customer', {
+          state: { from: { pathname: '/customer/demands/create' } },
+        });
+        return;
+      }
+      if (submissionLock.current) return;
+
+      const values = form.getFieldsValue();
+      const selectedCategory = Array.isArray(values.category)
+        ? values.category[0]
+        : values.category;
+      if (
+        !values.targetQuantity ||
+        !values.title?.trim() ||
+        !selectedCategory?.trim() ||
+        !values.unit?.trim() ||
+        !values.currency?.trim()
+      ) {
+        return;
+      }
+      submissionLock.current = true;
+      setLoading(true);
+      setSubmissionError(null);
+      const specifications = toDemandSpecifications(
+        values.mandatorySpecifications || [],
+        values.optionalSpecifications || []
+      );
+      const mandatoryRequirements = Object.fromEntries(
+        (values.mandatorySpecifications || [])
+          .filter((item: EditableSpecification) => item.name?.trim() && item.value?.trim())
+          .map((item: EditableSpecification) => [item.name.trim(), item.value.trim()])
+      );
+      const optionalPreferences = Object.fromEntries(
+        (values.optionalSpecifications || [])
+          .filter((item: EditableSpecification) => item.name?.trim() && item.value?.trim())
+          .map((item: EditableSpecification) => [item.name.trim(), item.value.trim()])
+      );
+      if (values.brand?.trim()) {
+        (brandIsMandatory ? mandatoryRequirements : optionalPreferences).brand = values.brand.trim();
+      }
+      if (values.model?.trim()) {
+        (modelIsMandatory ? mandatoryRequirements : optionalPreferences)['model number'] = values.model.trim();
+      }
+      try {
+        if (!submissionId.current) {
+          try {
+            submissionId.current = sessionStorage.getItem(SUBMISSION_ID_KEY);
+          } catch {
+            submissionId.current = null;
+          }
+          if (!submissionId.current) {
+            submissionId.current = crypto.randomUUID();
+            try {
+              sessionStorage.setItem(SUBMISSION_ID_KEY, submissionId.current);
+            } catch {
+              // Keep the key for retries during this page lifetime if storage is unavailable.
+            }
+          }
+        }
+        const data = await demandApi.createDemand({
+          product_name: values.title.trim(),
+          category: selectedCategory.trim(),
+          description: values.description,
+          brand: values.brand,
+          model_number: values.model,
+          technical_specifications: specifications,
+          quantity: values.targetQuantity,
+          unit: values.unit || 'units',
+          minimum_target_unit_price: values.minimumTargetPrice,
+          maximum_target_unit_price: values.maximumTargetPrice,
+          currency: values.currency.trim().toUpperCase(),
+          expected_lead_time: isAIDraftFlow
+            ? values.waitingPeriodDays
+            : undefined,
+          required_delivery_date: values.deadline
+            ? values.deadline.format('YYYY-MM-DD')
+            : null,
+          delivery_address: {
+            address: values.deliveryLocation || '',
+            instructions: [
+              values.deliveryRequirementsText,
+              values.deliveryDuration,
+              values.shippingTerms,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+          additional_requirements: values.additionalRequirements || '',
+          mandatory_requirements: mandatoryRequirements,
+          optional_preferences: optionalPreferences,
+        }, submissionId.current);
+        setCreatedDemand(data);
+        setSubmitted(true);
+        clearReviewedDemandDraft();
+        try {
+          sessionStorage.removeItem(SUBMISSION_ID_KEY);
+        } catch {
+          // The database idempotency key remains safe to reuse if storage cleanup fails.
+        }
+        submissionId.current = null;
+      } catch (requestError) {
+        setSubmissionError(
+          requestError instanceof Error
+            ? requestError.message
+            : 'Demand submission failed. Please try again.'
+        );
+      } finally {
+        submissionLock.current = false;
+        setLoading(false);
+      }
     } catch {
-      // validation error
+      // Ant Design displays field-level validation messages.
     }
   };
 
-  const handlePrev = () => setCurrentStep((prev) => prev - 1);
+  const handleCancel = (): void => {
+    if (isAIDraftFlow) clearReviewedDemandDraft();
+    try {
+      sessionStorage.removeItem(SUBMISSION_ID_KEY);
+    } catch {
+      // Session storage is optional; the demand was not submitted.
+    }
+    navigate('/');
+  };
 
-  if (submitted) {
+  const handlePrev = () => setCurrentStep((previous) => previous - 1);
+
+  if (authLoading) {
+    return <div style={{ padding: 40, textAlign: 'center' }}>Loading session...</div>;
+  }
+
+  if (!user || role !== 'customer') {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message="Customer authentication is required to create a demand."
+        action={
+          <Button
+            onClick={() =>
+              navigate('/login?role=customer', {
+                state: { from: { pathname: '/customer/demands/create', search: window.location.search } },
+              })
+            }
+          >
+            Sign in
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (submitted && createdDemand) {
     return (
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', padding: '30px 20px' }}>
-        <Result status="success" title="Product Demand Created Successfully!" subTitle={<span>Demand Code: <strong>{createdDemand.demand_code}</strong>. Your demand has been registered.</span>} extra={[<Button type="primary" key="demands" onClick={() => navigate('/customer/demands')}>View My Demands</Button>, <Button key="groups" onClick={() => navigate('/customer/groups')}>Explore Demand Groups</Button>]}>
+        <Result
+          status="success"
+          title="Demand Created Successfully!"
+          extra={[
+            <Button type="primary" key="demands" onClick={() => navigate('/customer/demands')}>
+              View My Demands
+            </Button>,
+            <Button
+              key="analyze"
+              onClick={() =>
+                navigate(
+                  `/customer/demands/${encodeURIComponent(createdDemand.id)}/analysis`
+                )
+              }
+            >
+              Analyze Existing Demands
+            </Button>,
+          ]}
+        >
           <div style={{ maxWidth: 600, margin: '0 auto', background: '#F5F7FA', padding: 20, borderRadius: 8, textAlign: 'left' }}>
-            <Title level={5} style={{ margin: 0, color: '#172B4D' }}>Demand Summary</Title>
+            <Title level={5} style={{ margin: 0 }}>Demand Summary</Title>
             <Divider style={{ margin: '12px 0' }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><Text type="secondary">Product:</Text><Text strong>{createdDemand.title}</Text></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><Text type="secondary">Category:</Text><Tag color="blue">{createdDemand.category}</Tag></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><Text type="secondary">Your Quantity:</Text><Text strong>{createdDemand.target_quantity} units</Text></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}><Text type="secondary">Target Unit Price:</Text><Text strong style={{ color: '#52C41A' }}>${createdDemand.target_price}</Text></div>
+            <p>Product: <strong>{createdDemand.product_name}</strong></p>
+            <p>Category: {createdDemand.category || 'Not specified'}</p>
+            <p>Quantity: {createdDemand.quantity} {createdDemand.unit}</p>
+            <p>
+              Target unit price: {createdDemand.minimum_target_unit_price ?? 'Not specified'}–{createdDemand.maximum_target_unit_price ?? 'Not specified'} {createdDemand.currency}
+            </p>
+            <p>Submitted: {createdDemand.created_at ? new Date(createdDemand.created_at).toLocaleString() : 'Not provided'}</p>
+            <p>Status: {createdDemand.status || 'Not provided'}</p>
+            {createdDemand.demand_code && (
+              <p>Demand reference: {createdDemand.demand_code}</p>
+            )}
+            {createdDemand.technical_specifications?.some((spec) => spec.mandatory) && (
+              <>
+                <strong>Mandatory specifications</strong>
+                <ul>
+                  {createdDemand.technical_specifications
+                    .filter((spec) => spec.mandatory)
+                    .map((spec) => <li key={`${spec.name}-${spec.value}`}>{spec.name}: {spec.value}</li>)}
+                </ul>
+              </>
+            )}
+            {createdDemand.technical_specifications?.some((spec) => !spec.mandatory) && (
+              <>
+                <strong>Optional specifications</strong>
+                <ul>
+                  {createdDemand.technical_specifications
+                    .filter((spec) => !spec.mandatory)
+                    .map((spec) => <li key={`${spec.name}-${spec.value}`}>{spec.name}: {spec.value}</li>)}
+                </ul>
+              </>
+            )}
           </div>
         </Result>
       </Card>
@@ -85,53 +521,388 @@ export const CreateDemand: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: '20px 24px' } }}>
-        <Title level={4} style={{ margin: 0, color: '#172B4D' }}>Create Product Demand</Title>
-        <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 13 }}>Specify what you need. When similar demands are detected, MarketTwin groups buyers to attract competitive volume offers from certified merchants.</Paragraph>
+        <Title level={4} style={{ margin: 0 }}>Create Product Demand</Title>
+        <Paragraph type="secondary" style={{ margin: '4px 0 0' }}>
+          Review and edit the demand details before submitting them to suppliers.
+        </Paragraph>
       </Card>
+      {isAIDraftFlow && !reviewedDraft && (
+        <Alert
+          type="warning"
+          showIcon
+          message="The reviewed AI summary is missing, malformed, or expired."
+          description="Return to product discovery and review the requirement summary again. No demand has been created."
+          action={<Button onClick={handleCancel}>Return to product discovery</Button>}
+        />
+      )}
+      {isAIDraftFlow && reviewedDraft && (
+        <Card title="Original shopping request">
+          <Paragraph style={{ marginBottom: 0 }}>{reviewedDraft.originalRequirement}</Paragraph>
+        </Card>
+      )}
+      {submissionError && <Alert type="error" showIcon message={submissionError} />}
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
-        <Steps current={currentStep} style={{ marginBottom: 32 }} items={[{ title: 'Product Specification', icon: <AppstoreAddOutlined /> }, { title: 'Volume & Budget', icon: <DollarOutlined /> }, { title: 'Grouping & Review', icon: <TeamOutlined /> }]} />
-        <Form form={form} layout="vertical" initialValues={{ title: initialProduct, category: initialCategory, targetQuantity: 5, targetPrice: initialPrice, description: initialDesc, qualityTier: 'Commercial / Enterprise', shippingTerms: 'Doorstep Delivery', leadTimeWeeks: 2, autoGroup: true }}>
-          {currentStep === 0 && (<div>
-            <Alert message="Specification Precision" description="Provide clear technical specifications and required certifications to help merchants evaluate manufacturing or wholesale feasibility." type="info" showIcon style={{ marginBottom: 20, background: '#F0F7FF', borderColor: '#BAE0FF' }} />
-            <Row gutter={16}>
-              <Col xs={24} md={16}><Form.Item name="title" label="Product Name / Demand Title" rules={[{ required: true, message: 'Please enter a demand title' }]}><Input placeholder="e.g. Ergonomic Office Mesh Chair with 4D Armrest" size="large" /></Form.Item></Col>
-              <Col xs={24} md={8}><Form.Item name="category" label="Product Category" rules={[{ required: true, message: 'Please select category' }]}><Select size="large" options={[{ label: 'Office Furniture', value: 'Office Furniture' }, { label: 'Renewable Energy', value: 'Renewable Energy' }, { label: 'Commercial Kitchen', value: 'Commercial Kitchen' }, { label: 'Electronics', value: 'Electronics' }, { label: 'Food & Beverage', value: 'Food & Beverage' }, { label: 'Industrial Equipment', value: 'Industrial Equipment' }]} /></Form.Item></Col>
-            </Row>
-            <Form.Item name="description" label="Detailed Technical Specifications & Acceptance Criteria" rules={[{ required: true, message: 'Please enter technical specifications' }]}><TextArea rows={4} placeholder="Detail exact dimensions, materials, tolerances, certifications..." /></Form.Item>
-            <Form.Item name="qualityTier" label="Target Quality Standard"><Radio.Group><Radio value="Standard Commercial">Standard Commercial</Radio><Radio value="Commercial / Enterprise">Enterprise Grade</Radio><Radio value="Premium Custom">Premium Custom Engineered</Radio></Radio.Group></Form.Item>
-          </div>)}
-          {currentStep === 1 && (<div>
-            <Alert message="Target Pricing Guidance" description="Set your realistic target unit price. Setting a competitive target gives merchants a clear benchmark for volume bidding." type="warning" showIcon style={{ marginBottom: 20, background: '#FFFBE6', borderColor: '#FFE58F' }} />
-            <Row gutter={16}>
-              <Col xs={24} sm={12}><Form.Item name="targetQuantity" label="Your Desired Quantity (Units)" rules={[{ required: true, message: 'Quantity is required' }]}><InputNumber min={1} max={10000} style={{ width: '100%' }} size="large" /></Form.Item></Col>
-              <Col xs={24} sm={12}><Form.Item name="targetPrice" label="Target Unit Price ($ USD)" rules={[{ required: true, message: 'Target price is required' }]}><InputNumber min={1} prefix="$" style={{ width: '100%' }} size="large" /></Form.Item></Col>
-            </Row>
-            <Row gutter={16}>
-              <Col xs={24} sm={12}><Form.Item name="deadline" label="Fulfillment Target Date"><DatePicker style={{ width: '100%' }} size="large" /></Form.Item></Col>
-              <Col xs={24} sm={12}><Form.Item name="shippingTerms" label="Preferred Delivery Method"><Select size="large" options={[{ label: 'Doorstep Pallet Delivery', value: 'Doorstep Delivery' }, { label: 'Warehouse / Dock Pickup', value: 'Warehouse Pickup' }, { label: 'Expedited Air Freight', value: 'Expedited Air' }]} /></Form.Item></Col>
-            </Row>
-          </div>)}
-          {currentStep === 2 && (<div>
-            <div style={{ background: '#F0F7FF', border: '1px solid #BAE0FF', borderRadius: 8, padding: 16, marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#1677FF', fontWeight: 600 }}><ThunderboltOutlined /> MarketTwin Demand Grouping Engine</div>
-              <Paragraph type="secondary" style={{ margin: '6px 0 0 0', fontSize: 13 }}>By default, compatible demands in your region and product category will be aggregated. Once the group volume threshold is reached, verified merchants receive immediate notification to submit competitive offers.</Paragraph>
-            </div>
-            <div style={{ background: '#F5F7FA', padding: 20, borderRadius: 8 }}>
-              <Title level={5} style={{ marginTop: 0, color: '#172B4D' }}>Review Your Demand Submission</Title>
-              <Divider style={{ margin: '12px 0' }} />
-              <Row gutter={[16, 8]}>
-                <Col span={12}><Text type="secondary">Demand Title:</Text></Col><Col span={12}><Text strong>{form.getFieldValue('title') || 'Custom Item'}</Text></Col>
-                <Col span={12}><Text type="secondary">Category:</Text></Col><Col span={12}><Tag color="blue">{form.getFieldValue('category')}</Tag></Col>
-                <Col span={12}><Text type="secondary">Desired Units:</Text></Col><Col span={12}><Text strong>{form.getFieldValue('targetQuantity')} units</Text></Col>
-                <Col span={12}><Text type="secondary">Target Unit Price:</Text></Col><Col span={12}><Text strong style={{ color: '#52C41A' }}>${form.getFieldValue('targetPrice')}</Text></Col>
+        <Steps
+          current={currentStep}
+          style={{ marginBottom: 32 }}
+          items={[
+            { title: 'Product Specification', icon: <AppstoreAddOutlined /> },
+            {
+              title: isAIDraftFlow ? 'Waiting Period' : 'Volume & Budget',
+              icon: <DollarOutlined />,
+            },
+            { title: 'Review & Submit', icon: <ThunderboltOutlined /> },
+          ]}
+        />
+        <Form form={form} layout="vertical" initialValues={formInitialValues}>
+          {currentStep === 0 && (
+            <div>
+              <Row gutter={16}>
+                <Col xs={24} md={12}>
+                  <Form.Item name="title" label="Product Name" rules={[{ required: true, whitespace: true, message: 'Please enter a product name' }]}>
+                    <Input size="large" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={6}>
+                  <Form.Item
+                    name="brand"
+                    label={brandIsMandatory ? 'Brand (mandatory)' : 'Brand'}
+                    rules={
+                      brandIsMandatory
+                        ? [{ required: true, message: 'A brand is required' }]
+                        : undefined
+                    }
+                  >
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={6}>
+                  <Form.Item
+                    name="model"
+                    label={modelIsMandatory ? 'Model (mandatory)' : 'Model'}
+                    rules={
+                      modelIsMandatory
+                        ? [{ required: true, message: 'A model is required' }]
+                        : undefined
+                    }
+                  >
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item
+                    name="category"
+                    label="Category"
+                    rules={[
+                      {
+                        validator: async (_, value: unknown) => {
+                          const category = Array.isArray(value) ? value[0] : value;
+                          if (typeof category === 'string' && category.trim()) return;
+                          throw new Error('Please select or enter a category');
+                        },
+                      },
+                    ]}
+                  >
+                    <Select
+                      allowClear
+                      showSearch
+                      mode="tags"
+                      maxCount={1}
+                      options={[
+                        'Office Furniture',
+                        'Renewable Energy',
+                        'Commercial Kitchen',
+                        'Electronics',
+                        'Food & Beverage',
+                        'Industrial Equipment',
+                        ...(initialCategoryValue ? [initialCategoryValue] : []),
+                      ].map((category) => ({ label: category, value: category }))}
+                    />
+                  </Form.Item>
+                </Col>
               </Row>
+              <Form.Item label="Mandatory specifications">
+                <Form.List name="mandatorySpecifications">
+                  {(fields, { add, remove }) => (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      {fields.map((field) => (
+                        <Row key={field.key} gutter={8} align="top">
+                          <Col flex="1">
+                            <Form.Item
+                              name={[field.name, 'name']}
+                              rules={[{ required: true, whitespace: true, message: 'Enter a requirement name' }]}
+                            >
+                              <Input placeholder="Specification" aria-label="Mandatory specification name" />
+                            </Form.Item>
+                          </Col>
+                          <Col flex="2">
+                            <Form.Item
+                              name={[field.name, 'value']}
+                              rules={[{ required: true, whitespace: true, message: 'Enter a requirement value' }]}
+                            >
+                              <Input placeholder="Required value" aria-label="Mandatory specification value" />
+                            </Form.Item>
+                          </Col>
+                          <Col>
+                            <Button
+                              aria-label="Remove mandatory specification"
+                              icon={<MinusCircleOutlined />}
+                              onClick={() => remove(field.name)}
+                            />
+                          </Col>
+                        </Row>
+                      ))}
+                      <Button type="dashed" onClick={() => add({ name: '', value: '' })} icon={<PlusOutlined />}>
+                        Add mandatory specification
+                      </Button>
+                    </Space>
+                  )}
+                </Form.List>
+              </Form.Item>
+              <Form.Item label="Optional specifications and preferences">
+                <Form.List name="optionalSpecifications">
+                  {(fields, { add, remove }) => (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      {fields.map((field) => (
+                        <Row key={field.key} gutter={8} align="top">
+                          <Col flex="1">
+                            <Form.Item
+                              name={[field.name, 'name']}
+                              rules={[
+                                ({ getFieldValue }) => ({
+                                  validator(_, value: string | undefined) {
+                                    const sibling = getFieldValue([
+                                      'optionalSpecifications',
+                                      field.name,
+                                      'value',
+                                    ]);
+                                    if (!value?.trim() && !sibling?.trim()) return Promise.resolve();
+                                    if (value?.trim()) return Promise.resolve();
+                                    return Promise.reject(new Error('Enter a preference name'));
+                                  },
+                                }),
+                              ]}
+                            >
+                              <Input placeholder="Preference" aria-label="Optional specification name" />
+                            </Form.Item>
+                          </Col>
+                          <Col flex="2">
+                            <Form.Item
+                              name={[field.name, 'value']}
+                              rules={[
+                                ({ getFieldValue }) => ({
+                                  validator(_, value: string | undefined) {
+                                    const sibling = getFieldValue([
+                                      'optionalSpecifications',
+                                      field.name,
+                                      'name',
+                                    ]);
+                                    if (!value?.trim() && !sibling?.trim()) return Promise.resolve();
+                                    if (value?.trim()) return Promise.resolve();
+                                    return Promise.reject(new Error('Enter a preference value'));
+                                  },
+                                }),
+                              ]}
+                            >
+                              <Input placeholder="Preferred value" aria-label="Optional specification value" />
+                            </Form.Item>
+                          </Col>
+                          <Col>
+                            <Button
+                              aria-label="Remove optional specification"
+                              icon={<MinusCircleOutlined />}
+                              onClick={() => remove(field.name)}
+                            />
+                          </Col>
+                        </Row>
+                      ))}
+                      <Button type="dashed" onClick={() => add({ name: '', value: '' })} icon={<PlusOutlined />}>
+                        Add optional specification
+                      </Button>
+                    </Space>
+                  )}
+                </Form.List>
+              </Form.Item>
+              <Form.Item name="description" label="Description"><TextArea rows={3} /></Form.Item>
             </div>
-          </div>)}
-          <Divider style={{ margin: '24px 0 16px 0' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Button disabled={currentStep === 0} onClick={handlePrev} icon={<ArrowLeftOutlined />}>Previous</Button>
-            <Button type="primary" onClick={handleNext} loading={loading} icon={currentStep === 2 ? <CheckCircleOutlined /> : <ArrowRightOutlined />}>{currentStep === 2 ? 'Submit Demand' : 'Next Step'}</Button>
+          )}
+          {currentStep === 1 && (
+            isAIDraftFlow ? (
+              <Form.Item
+                name="waitingPeriodDays"
+                label="How many days are you willing to wait?"
+                rules={[
+                  { required: true, message: 'Please enter how many days you are willing to wait' },
+                  { type: 'number', min: 1, max: 3650, message: 'Enter a waiting period from 1 to 3650 days' },
+                  {
+                    validator: async (_, value: number | undefined) => {
+                      if (value === undefined || Number.isInteger(value)) return;
+                      throw new Error('Waiting period must be a whole number of days');
+                    },
+                  },
+                ]}
+              >
+                <InputNumber
+                  min={1}
+                  max={3650}
+                  precision={0}
+                  addonAfter="days"
+                  placeholder="e.g. 30"
+                  style={{ width: '100%', maxWidth: 360 }}
+                />
+              </Form.Item>
+            ) : (
+              <div>
+                <Row gutter={16}>
+                  <Col xs={24} sm={8}>
+                    <Form.Item name="targetQuantity" label="Purchase quantity" rules={[{ required: true, message: 'Quantity is required' }]}>
+                      <InputNumber min={0.000001} max={1000000000} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Form.Item name="unit" label="Unit" rules={[{ required: true, message: 'Unit is required' }]}>
+                      <Input placeholder="unit, units, pieces..." />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Form.Item
+                      name="minimumTargetPrice"
+                      label="Minimum target unit price"
+                      rules={[
+                        { required: true, message: 'Minimum target unit price is required' },
+                        { type: 'number', min: 0.000001, message: 'Minimum target unit price must be greater than zero' },
+                      ]}
+                    >
+                      <InputNumber min={0.000001} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Form.Item
+                      name="maximumTargetPrice"
+                      label="Maximum target unit price"
+                      dependencies={['minimumTargetPrice']}
+                      rules={[
+                        { required: true, message: 'Maximum target unit price is required' },
+                        { type: 'number', min: 0.000001, message: 'Maximum target unit price must be greater than zero' },
+                        ({ getFieldValue }) => ({
+                          validator(_, value: number | undefined) {
+                            const minimum = getFieldValue('minimumTargetPrice') as number | undefined;
+                            if (value === undefined || minimum === undefined || value >= minimum) {
+                              return Promise.resolve();
+                            }
+                            return Promise.reject(new Error('Maximum target price must be at least the minimum'));
+                          },
+                        }),
+                      ]}
+                    >
+                      <InputNumber min={0.000001} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Form.Item
+                      name="currency"
+                      label="Currency"
+                      rules={[
+                        { required: true, whitespace: true, message: 'Currency is required' },
+                        { pattern: /^[A-Za-z]{3}$/, message: 'Enter a 3-letter currency code' },
+                      ]}
+                    >
+                      <Input placeholder="e.g. INR" maxLength={3} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </div>
+            )
+          )}
+          {currentStep === 2 && (
+            <div>
+              <Form.Item
+                name="deliveryLocation"
+                label="Delivery location"
+                rules={hasDeliveryLocation ? [{ required: true, whitespace: true, message: 'Delivery location is required by your reviewed requirements' }] : undefined}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="deliveryRequirementsText"
+                label="Delivery requirements"
+                rules={hasOtherDeliveryConstraints ? [{ required: true, whitespace: true, message: 'Delivery requirements are required by your reviewed requirements' }] : undefined}
+              >
+                <TextArea rows={3} placeholder="Timing, instructions, or other delivery constraints" />
+              </Form.Item>
+              {!isAIDraftFlow && (
+                <Form.Item
+                  name="deliveryDuration"
+                  label="Expected delivery duration"
+                  rules={hasDeliveryDuration ? [{ required: true, whitespace: true, message: 'Delivery duration is required by your reviewed requirements' }] : undefined}
+                >
+                  <Input placeholder="e.g. within 3 weeks" />
+                </Form.Item>
+              )}
+              <Form.Item name="additionalRequirements" label="Additional requirements">
+                <TextArea rows={3} />
+              </Form.Item>
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <Form.Item name="deadline" label="Fulfillment target date"><DatePicker style={{ width: '100%' }} /></Form.Item>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <Form.Item name="shippingTerms" label="Preferred delivery method">
+                    <Select
+                      allowClear
+                      options={[
+                        { label: 'Doorstep Pallet Delivery', value: 'Doorstep Delivery' },
+                        { label: 'Warehouse / Dock Pickup', value: 'Warehouse Pickup' },
+                        { label: 'Expedited Air Freight', value: 'Expedited Air' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <div style={{ background: '#F5F7FA', padding: 20, borderRadius: 8 }}>
+                <Title level={5}>Review Your Demand Submission</Title>
+                <Text strong>{form.getFieldValue('title') || 'Product name required'}</Text>
+                <Paragraph>{form.getFieldValue('category') || 'Category not specified'}</Paragraph>
+                {isAIDraftFlow && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="Mandatory specifications and optional preferences are preserved as separate entries."
+                  />
+                )}
+              </div>
+            </div>
+          )}
+          <Divider style={{ margin: '24px 0 16px' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <div>
+              <Button disabled={currentStep === 0 || loading} onClick={handlePrev} icon={<ArrowLeftOutlined />}>
+                Previous
+              </Button>
+              {isAIDraftFlow && (
+                <Button style={{ marginLeft: 8 }} disabled={loading} onClick={handleCancel}>
+                  Cancel
+                </Button>
+              )}
+            </div>
+            <Button
+              type="primary"
+              onClick={() => void handleNext()}
+              loading={loading}
+              disabled={
+                loading ||
+                (isAIDraftFlow && (!reviewedDraft || currentStep === 2))
+              }
+              icon={currentStep === 2 ? <CheckCircleOutlined /> : <ArrowRightOutlined />}
+            >
+              {currentStep === 2 ? 'Submit Demand' : 'Next Step'}
+            </Button>
           </div>
+          {isAIDraftFlow && currentStep === 2 && (
+            <Paragraph type="secondary" style={{ marginTop: 12 }}>
+              Submission is intentionally disabled until the deployed persistence schema is verified.
+            </Paragraph>
+          )}
         </Form>
       </Card>
     </div>

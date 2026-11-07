@@ -41,108 +41,84 @@ def _convert_unit(value: float, from_unit: str, to_unit: str) -> Optional[float]
 
 def extract_requirements(demand: Dict[str, Any]) -> Dict[str, Any]:
     missing: List[str] = []
-    validation_errors: List[str] = []
     clarification_questions: List[str] = []
 
-    product_name = demand.get("product_name")
+    product_name = demand.get("product_name") or demand.get("title")
     category = demand.get("category")
     brand = demand.get("brand")
     model_number = demand.get("model_number")
-    description = demand.get("description")
     material = demand.get("material")
-    certifications = demand.get("certifications") or []
     specs = demand.get("technical_specifications") or []
     dimensions = demand.get("dimensions") or {}
-    quantity = demand.get("quantity")
+    quantity = demand.get("quantity", demand.get("target_quantity"))
     unit = demand.get("unit")
-    target_price = demand.get("target_unit_price")
-    max_budget = demand.get("maximum_budget")
-    currency = demand.get("currency") or "USD"
-    delivery_date = demand.get("required_delivery_date")
+    minimum_price = demand.get("minimum_target_unit_price", demand.get("min_target_unit_price"))
+    maximum_price = demand.get("maximum_target_unit_price", demand.get("max_target_unit_price"))
+    currency = demand.get("currency")
     lead_time = demand.get("expected_lead_time")
-    delivery_address = demand.get("delivery_address") or {}
-    additional = demand.get("additional_requirements")
 
-    # Missing info detection
-    if not dimensions:
-        missing.append("dimensions")
-        clarification_questions.append("Please provide product dimensions.")
-    if not material:
-        missing.append("material")
-        clarification_questions.append("Please specify the required material.")
-    if not certifications:
-        missing.append("certifications")
-    if quantity is None or quantity <= 0:
-        validation_errors.append("Quantity must be greater than zero.")
-    if target_price is not None and target_price < 0:
-        validation_errors.append("Target unit price cannot be negative.")
-    if max_budget is not None and max_budget < 0:
-        validation_errors.append("Maximum budget cannot be negative.")
+    if not product_name:
+        missing.append("product_name")
+        clarification_questions.append("Please specify the product.")
+    if quantity is None or float(quantity) <= 0:
+        missing.append("quantity")
+        clarification_questions.append("Please specify a positive purchase quantity.")
+    if not unit:
+        missing.append("unit")
+        clarification_questions.append("Please specify the quantity unit.")
+    if minimum_price is None or float(minimum_price) <= 0:
+        missing.append("minimum_target_unit_price")
+        clarification_questions.append("Please specify a minimum target unit price.")
+    if maximum_price is None or float(maximum_price) <= 0:
+        missing.append("maximum_target_unit_price")
+        clarification_questions.append("Please specify a maximum target unit price.")
+    if minimum_price is not None and maximum_price is not None and float(maximum_price) < float(minimum_price):
+        missing.append("valid_target_price_range")
+        clarification_questions.append("The maximum target unit price must not be below the minimum.")
+    if not currency:
+        missing.append("currency")
+        clarification_questions.append("Please specify a currency.")
 
-    # Normalize dimensions with unit conversion where possible
     normalized_dimensions = {}
     for key in ["length", "width", "height"]:
         val = dimensions.get(key)
         if val is not None:
             normalized_dimensions[key] = {"original": val, "unit": dimensions.get("unit")}
     if dimensions.get("unit"):
-        # Convert to cm if possible
-        unit = dimensions.get("unit")
+        dimension_unit = dimensions.get("unit")
         for key in ["length", "width", "height"]:
             val = dimensions.get(key)
-            if val is not None and unit:
-                converted = _convert_unit(float(val), unit, "cm")
+            if val is not None and dimension_unit:
+                converted = _convert_unit(float(val), dimension_unit, "cm")
                 if converted is not None:
                     normalized_dimensions[key] = {
                         "original": val,
-                        "original_unit": unit,
+                        "original_unit": dimension_unit,
                         "normalized": converted,
                         "normalized_unit": "cm",
                     }
 
     normalized_material = _normalize_material(material)
-
-    # Mandatory requirements
-    mandatory = []
-    if material:
-        mandatory.append({"type": "material", "value": material, "normalized": normalized_material})
-    if certifications:
-        mandatory.append({"type": "certifications", "value": certifications})
-    if quantity:
-        mandatory.append({"type": "quantity", "value": quantity, "unit": unit})
-
-    # Optional preferences
-    optional = []
-    if brand:
-        optional.append({"type": "brand", "value": brand})
-    if dimensions:
-        optional.append({"type": "dimensions", "value": dimensions})
-
-    # Commercial constraints
-    commercial = {
-        "quantity": quantity,
-        "unit": unit,
-        "target_unit_price": target_price,
-        "maximum_budget": max_budget,
-        "currency": currency,
-    }
-
-    # Delivery constraints
-    delivery = {
-        "required_delivery_date": delivery_date,
-        "expected_lead_time": lead_time,
-        "delivery_address": delivery_address,
-    }
-
-    # Normalized specifications
     normalized_specs = {}
+    mandatory = []
+    optional = []
     for spec in specs:
         name = spec.get("name") if isinstance(spec, dict) else None
         value = spec.get("value") if isinstance(spec, dict) else None
         if name:
             normalized_specs[name] = value
+            entry = {"name": name, "value": value}
+            (mandatory if spec.get("mandatory") is True else optional).append(entry)
+    if material:
+        normalized_specs.setdefault("material", material)
+    if brand:
+        normalized_specs.setdefault("brand", brand)
+        optional.append({"name": "brand", "value": brand})
+    if model_number:
+        normalized_specs.setdefault("model_number", model_number)
+        optional.append({"name": "model number", "value": model_number})
 
-    status = "Needs Clarification" if missing or validation_errors else "Completed"
+    status = "Needs Clarification" if missing else "Completed"
 
     return {
         "product_type": product_name,
@@ -153,11 +129,19 @@ def extract_requirements(demand: Dict[str, Any]) -> Dict[str, Any]:
         "normalized_dimensions": normalized_dimensions,
         "mandatory_requirements": mandatory,
         "optional_preferences": optional,
-        "commercial_constraints": commercial,
-        "delivery_constraints": delivery,
+        "commercial_constraints": {
+            "quantity": quantity,
+            "unit": unit,
+            "minimum_target_unit_price": minimum_price,
+            "maximum_target_unit_price": maximum_price,
+            "currency": currency,
+        },
+        "delivery_constraints": {
+            "expected_lead_time": lead_time,
+        } if lead_time is not None else {},
         "missing_information": missing,
         "clarification_questions": clarification_questions,
-        "validation_errors": validation_errors,
+        "validation_errors": [],
         "confidence_score": None,
         "status": status,
     }
