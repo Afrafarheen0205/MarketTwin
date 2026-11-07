@@ -39,7 +39,7 @@ async def merchant_update_status(order_id: str, payload: Dict[str, Any], current
     if not new_status:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status is required.")
     try:
-        order = update_order_status(current_user["id"], order_id, new_status, message)
+        order = update_order_status(current_user["id"], order_id, new_status, message, extra=payload)
         return order
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))

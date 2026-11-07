@@ -12,6 +12,10 @@ class AIProviderUnavailable(AIProviderError):
     """The configured AI provider could not be reached or is unavailable."""
 
 
+class AIProviderResourceError(AIProviderUnavailable):
+    """The provider cannot run because required local resources are unavailable."""
+
+
 class AIProviderTimeout(AIProviderError):
     """The AI provider did not respond within the configured timeout."""
 

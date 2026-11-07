@@ -133,7 +133,7 @@ def seed():
             "rating": 4.6,
             "reviews_count": 45,
             "in_stock": True,
-            "image_url": "https://images.unsplash.com/photo-1581092335397-9583fe92d232?auto=format&fit=crop&w=800&q=80",
+            "image_url": "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=800&q=80",
             "specs": {
                 "Brand": "PolyVessel",
                 "Model": "PL-HDPE-1000L",
@@ -209,7 +209,7 @@ def seed():
             "rating": 5.0,
             "reviews_count": 27,
             "in_stock": True,
-            "image_url": "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+            "image_url": "https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?auto=format&fit=crop&w=800&q=80",
             "specs": {
                 "Brand": "VoltStore",
                 "Model": "VS-48100-RM",
@@ -234,7 +234,7 @@ def seed():
             "rating": 4.7,
             "reviews_count": 41,
             "in_stock": True,
-            "image_url": "https://images.unsplash.com/photo-1581092335397-9583fe92d232?auto=format&fit=crop&w=800&q=80",
+            "image_url": "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=800&q=80",
             "specs": {
                 "Brand": "MotionPro",
                 "Model": "MP-86HBM-8N",

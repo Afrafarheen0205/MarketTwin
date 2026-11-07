@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Row,
@@ -28,12 +28,14 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { supabase } from '../../services/supabase';
+import { fetchOrders, updateOrderStatus, subscribeToOrders } from '../../services/orderService';
 
 const { Title, Text } = Typography;
 
 export const OrderManagement: React.FC = () => {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [carrierFilter, setCarrierFilter] = useState('all');
@@ -41,13 +43,83 @@ export const OrderManagement: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [syncing, setSyncing] = useState(false);
   const [viewingOrder, setViewingOrder] = useState<any | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
-  const handleSync = () => {
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchOrders();
+      const mapped = (data || []).map((o: any) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        productName: o.product_name || 'Commercial Product',
+        merchantName: o.merchant_name || 'Not provided',
+        demandCode: o.demand_code || 'DIRECT-CATALOG',
+        trackingNumber: o.tracking_number || 'PENDING-TRACKING',
+        quantity: o.quantity || 1,
+        totalPrice: Number(o.total_price || 0),
+        status: o.status || 'Approved',
+        carrier: o.carrier || 'Standard Freight',
+        orderDate: o.order_date || o.created_at?.split('T')[0] || 'Recent',
+        estimatedDelivery: o.estimated_delivery || '3-5 Business Days',
+        customerId: o.customer_id,
+        paymentStatus: o.payment_status || 'Not Initiated',
+        fulfillmentStatus: o.fulfillment_status || 'Not Started',
+      }));
+      setOrders(mapped);
+    } catch (err) {
+      console.error('Failed to load admin orders:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Initial load and Real-time subscription to orders table
+  useEffect(() => {
+    loadOrders();
+    const unsubscribe = subscribeToOrders(() => {
+      loadOrders();
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [loadOrders]);
+
+  const handleSync = async () => {
     setSyncing(true);
-    setTimeout(() => {
-      setSyncing(false);
-      message.success('Escrow settlements & logistics carrier tracking refreshed.');
-    }, 600);
+    await loadOrders();
+    setSyncing(false);
+    message.success('Escrow settlements & logistics carrier tracking refreshed from Supabase.');
+  };
+
+  const handleAuthorizeRelease = async () => {
+    if (!viewingOrder) return;
+    setUpdatingStatus(true);
+    try {
+      await updateOrderStatus(viewingOrder.id, 'Delivered');
+      message.success(`Escrow released and Order ${viewingOrder.orderNumber} marked as Delivered!`);
+      setViewingOrder(null);
+      loadOrders();
+    } catch (err: any) {
+      message.error(err.message || 'Failed to authorize escrow release.');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleAdminStatusChange = async (newStatus: string) => {
+    if (!viewingOrder) return;
+    setUpdatingStatus(true);
+    try {
+      await updateOrderStatus(viewingOrder.id, newStatus);
+      message.success(`Order ${viewingOrder.orderNumber} updated to ${newStatus}!`);
+      setViewingOrder({ ...viewingOrder, status: newStatus });
+      loadOrders();
+    } catch (err: any) {
+      message.error(err.message || 'Failed to update order status.');
+    } finally {
+      setUpdatingStatus(false);
+    }
   };
 
   const filtered = orders.filter((o) => {
@@ -637,7 +709,8 @@ export const OrderManagement: React.FC = () => {
               columns={columns}
               dataSource={filtered}
               rowKey="id"
-              pagination={{ pageSize: 6, showSizeChanger: false }}
+              loading={loading}
+              pagination={{ pageSize: 8, showSizeChanger: false }}
             />
           </div>
         ) : (
@@ -785,22 +858,20 @@ export const OrderManagement: React.FC = () => {
           </button>,
           <button
             key="release"
-            onClick={() => {
-              message.success(`Escrow settlement for Order ${viewingOrder?.orderNumber} released to merchant.`);
-              setViewingOrder(null);
-            }}
+            onClick={handleAuthorizeRelease}
+            disabled={updatingStatus || viewingOrder?.status === 'Delivered'}
             style={{
-              backgroundColor: '#0A101D',
+              backgroundColor: viewingOrder?.status === 'Delivered' ? '#94A3B8' : '#059669',
               color: '#FFFFFF',
               border: 'none',
               borderRadius: 18,
               padding: '6px 18px',
               fontSize: 13,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: viewingOrder?.status === 'Delivered' ? 'not-allowed' : 'pointer',
             }}
           >
-            Authorize Escrow Release
+            {viewingOrder?.status === 'Delivered' ? 'Escrow Released' : 'Authorize Escrow Release'}
           </button>,
         ]}
         width={640}
@@ -824,19 +895,35 @@ export const OrderManagement: React.FC = () => {
                 <Text code copyable>{viewingOrder.trackingNumber}</Text>
               </Descriptions.Item>
               <Descriptions.Item label="Est. Delivery">{viewingOrder.estimatedDelivery}</Descriptions.Item>
-              <Descriptions.Item label="Status">
-                <span
-                  style={{
-                    backgroundColor: viewingOrder.status === 'Delivered' ? '#ECFDF5' : '#EFF6FF',
-                    color: viewingOrder.status === 'Delivered' ? '#059669' : '#2563EB',
-                    padding: '2px 10px',
-                    borderRadius: 12,
-                    fontWeight: 600,
-                    fontSize: 12,
-                  }}
-                >
-                  {viewingOrder.status}
-                </span>
+              <Descriptions.Item label="Status" span={2}>
+                <Space>
+                  <span
+                    style={{
+                      backgroundColor: viewingOrder.status === 'Delivered' ? '#ECFDF5' : '#EFF6FF',
+                      color: viewingOrder.status === 'Delivered' ? '#059669' : '#2563EB',
+                      padding: '2px 10px',
+                      borderRadius: 12,
+                      fontWeight: 600,
+                      fontSize: 12,
+                    }}
+                  >
+                    {viewingOrder.status}
+                  </span>
+                  <Select
+                    size="small"
+                    value={viewingOrder.status}
+                    onChange={handleAdminStatusChange}
+                    loading={updatingStatus}
+                    style={{ width: 150 }}
+                    options={[
+                      { value: 'Approved', label: 'Approved' },
+                      { value: 'Processing', label: 'Processing' },
+                      { value: 'Dispatched', label: 'Dispatched' },
+                      { value: 'Delivered', label: 'Delivered' },
+                      { value: 'Cancelled', label: 'Cancelled' },
+                    ]}
+                  />
+                </Space>
               </Descriptions.Item>
             </Descriptions>
 

@@ -37,6 +37,7 @@ import {
 } from '@ant-design/icons';
 import { HealthResponse } from '../../types';
 import axiosClient from '../../api/axiosClient';
+import { fetchOrders, subscribeToOrders } from '../../services/orderService';
 
 const { Title, Text } = Typography;
 
@@ -76,6 +77,7 @@ export const AdminDashboard: React.FC = () => {
   const checkHealth = context?.checkHealth || (() => {});
   const [syncing, setSyncing] = useState(false);
   const [overview, setOverview] = useState<any>(null);
+  const [platformOrders, setPlatformOrders] = useState<any[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -83,8 +85,22 @@ export const AdminDashboard: React.FC = () => {
         const res = await axiosClient.get('/api/v1/admin/dashboard/overview');
         setOverview(res.data);
       } catch (e) {}
+      try {
+        const ords = await fetchOrders();
+        setPlatformOrders(ords || []);
+      } catch (e) {}
     };
     load();
+
+    const unsubscribe = subscribeToOrders(() => {
+      fetchOrders()
+        .then((ords) => setPlatformOrders(ords || []))
+        .catch(() => {});
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // View mode switcher: List View vs Grid View
@@ -107,10 +123,12 @@ export const AdminDashboard: React.FC = () => {
   const handleSync = async () => {
     setSyncing(true);
     await checkHealth();
-    setTimeout(() => {
-      setSyncing(false);
-      message.success('Overview metrics synced.');
-    }, 600);
+    try {
+      const ords = await fetchOrders();
+      setPlatformOrders(ords || []);
+    } catch (e) {}
+    setSyncing(false);
+    message.success('Overview metrics & platform order stream synced.');
   };
 
   // Main Offers Dataset (Styled exactly like the screenshot)
@@ -639,11 +657,25 @@ export const AdminDashboard: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ color: '#475569', fontSize: 14.5, fontWeight: 600 }}>Your Active Offers</span>
-              <EyeOutlined style={{ color: '#94A3B8', fontSize: 16, cursor: 'pointer' }} />
+              <span style={{ color: '#475569', fontSize: 14.5, fontWeight: 600 }}>Total Platform Orders</span>
+              <EyeOutlined style={{ color: '#94A3B8', fontSize: 16, cursor: 'pointer' }} onClick={() => navigate('/admin/orders')} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>{overview?.completed_orders ?? 0}</span>
+              <span style={{ fontSize: 40, fontWeight: 800, color: '#0F172A', lineHeight: 1 }}>
+                {platformOrders.length || overview?.completed_orders || 0}
+              </span>
+              <span
+                style={{
+                  backgroundColor: '#EFF6FF',
+                  color: '#2563EB',
+                  borderRadius: 12,
+                  padding: '2px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                Live Sync
+              </span>
             </div>
           </div>
         </Col>

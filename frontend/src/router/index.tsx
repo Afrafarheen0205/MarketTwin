@@ -44,6 +44,7 @@ import MerchantProfile from '../pages/merchant/MerchantProfile';
 
 // Admin Module
 import AdminDashboard from '../pages/admin/AdminDashboard';
+import AdminProfile from '../pages/admin/AdminProfile';
 import CustomerManagement from '../pages/admin/CustomerManagement';
 import MerchantManagement from '../pages/admin/MerchantManagement';
 import ProductManagement from '../pages/admin/ProductManagement';
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
 
       { path: 'admin', element: <Navigate to="/admin/dashboard" replace /> },
       { path: 'admin/dashboard', element: C(<AdminDashboard />, ['admin']) },
+      { path: 'admin/profile', element: C(<AdminProfile />, ['admin']) },
       { path: 'admin/customers', element: C(<CustomerManagement />, ['admin']) },
       { path: 'admin/merchants', element: C(<MerchantManagement />, ['admin']) },
       { path: 'admin/products', element: C(<ProductManagement />, ['admin']) },

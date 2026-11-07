@@ -27,15 +27,12 @@ VITE_SUPABASE_ANON_KEY=<anon-public-key>
 The frontend uses only the anon key. The service-role key is backend-only.
 
 ## Migrations
-Run all migrations:
-```
-cd backend
-python sql/migrations/run_migration.py
-```
-Files:
-- `001_initial_schema.sql` - core tables, enums, indexes, base RLS
-- `002_phase3_expansion.sql` - expanded production tables, columns, RLS
-- `003_services.sql` - storage buckets and realtime publication
+Apply the SQL files in `backend/sql/migrations` in filename order through the
+latest migration, currently `018_private_merchant_profiles.sql`.
+
+The migration directory is the source of truth for the deployed schema.
+`backend/sql/schema.sql` is a baseline snapshot and does not include every later
+migration.
 
 ## Core Tables
 User management:
@@ -77,6 +74,8 @@ Platform management:
 
 ## Key Relationships
 - `profiles.id` references `auth.users.id`
+- `customer_profiles.id` and `merchant_profiles.id` reference the same profile
+  and Supabase Auth user ID
 - `demands.customer_id` references `profiles.id`
 - `demands.group_id` references `demand_groups.id`
 - `demand_group_members` links customers to demand groups
@@ -91,7 +90,7 @@ Platform management:
 ## Security
 - RLS is enabled on all application tables.
 - Customers can access only their own profile, demands, orders, payments, and authorized offers.
-- Merchants can view anonymized demand data and manage only their own offers and fulfillment records.
+- Merchants can access their own private merchant profile and manage only their own offers and fulfillment records.
 - Admin access is role-based through `profiles.role` and `is_admin()`.
 - Service-role key is never exposed to the frontend.
 
@@ -128,6 +127,13 @@ Reusable service modules:
 - `frontend/src/services/demandService.ts`
 
 Existing UI pages are preserved; mock data remains until each module is migrated to live queries.
+
+The shared auth context verifies the active Supabase user with `auth.getUser()`,
+then loads that user's `profiles` row by the same ID under RLS. The role in
+`profiles.role` is authoritative; user metadata is only a display-name and
+profile-image fallback. Customer and merchant details come from their matching
+role-specific profile rows. Admins use the `profiles` row; there is no separate
+admin profile table.
 
 ## Email Configuration (Supabase Auth)
 

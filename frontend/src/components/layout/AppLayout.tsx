@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Layout,
@@ -15,6 +15,7 @@ import {
   List,
   Segmented,
   Input,
+  message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -48,8 +49,10 @@ import {
 } from '@ant-design/icons';
 import healthApi from '../../api/healthApi';
 import { HealthResponse } from '../../types';
-import { useAuth } from '../../context/AuthContext';
+import { profileInitials, useAuth } from '../../context/AuthContext';
 import { env, isSupabaseConfigured } from '../../config/env';
+import RoleSelectionModal from '../common/RoleSelectionModal';
+import type { AuthAction } from '../common/RoleSelectionModal';
 // mock data removed; notifications are loaded from Supabase when available
 
 const { Header, Sider, Content, Footer } = Layout;
@@ -61,16 +64,54 @@ export const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { user, role: authRole, signOut } = useAuth();
+  const { user, profile, role: authRole, signOut } = useAuth();
   const currentPath = location.pathname;
   const isHomePage = currentPath === '/';
-  const activeRole: ActiveRole = authRole === 'merchant' ? 'merchant' : authRole === 'admin' ? 'admin' : 'customer';
+  const activeRole: ActiveRole | null = authRole;
+  const profileName = profile?.fullName?.trim() || 'Name unavailable';
+  const profileEmail = profile?.email || 'Email unavailable';
 
   const [collapsed, setCollapsed] = useState(false);
   const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [pinging, setPinging] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [authAction, setAuthAction] = useState<AuthAction | null>(null);
+  const [roleSelectionOpen, setRoleSelectionOpen] = useState(false);
+  const roleNavigationStarted = useRef(false);
+
+  const openRoleSelection = (action: AuthAction) => {
+    roleNavigationStarted.current = false;
+    setAuthAction(action);
+    setRoleSelectionOpen(true);
+  };
+
+  const closeRoleSelection = () => {
+    setRoleSelectionOpen(false);
+    setAuthAction(null);
+  };
+
+  const navigateForRole = (selectedRole: ActiveRole) => {
+    if (roleNavigationStarted.current || !authAction) return;
+    if (authAction === 'register' && selectedRole === 'admin') return;
+
+    roleNavigationStarted.current = true;
+    const destination = authAction === 'login'
+      ? `/auth/login?role=${selectedRole}`
+      : `/auth/register/${selectedRole}`;
+    closeRoleSelection();
+    navigate(destination);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      navigate('/', { replace: true });
+    } catch (error) {
+      console.error('Unable to sign out of the current account.', error);
+      message.error('Unable to sign out. Please try again.');
+    }
+  };
 
   // Backend Health Polling
   const checkHealth = async () => {
@@ -296,9 +337,9 @@ export const AppLayout: React.FC = () => {
       key: 'profile-view',
       label: (
         <div>
-          <div style={{ fontWeight: 600, color: '#172B4D' }}>Alex Mercer</div>
-          <div style={{ fontSize: 12, color: '#6B778C' }}>alex.mercer@techstart.io</div>
-          <Tag color="blue" style={{ marginTop: 4 }}>Role: {activeRole.toUpperCase()}</Tag>
+          <div style={{ fontWeight: 600, color: '#172B4D' }}>{profileName}</div>
+          <div style={{ fontSize: 12, color: '#6B778C' }}>{profileEmail}</div>
+          <Tag color="blue" style={{ marginTop: 4 }}>Role: {activeRole?.toUpperCase() ?? 'UNVERIFIED'}</Tag>
         </div>
       ),
     },
@@ -314,17 +355,14 @@ export const AppLayout: React.FC = () => {
       key: 'logout',
       icon: <CloseCircleOutlined />,
       label: 'Logout',
-      onClick: async () => {
-        await signOut();
-        navigate('/login', { replace: true });
-      },
+      onClick: handleLogout,
     },
   ];
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#F5F7FA' }}>
       {/* Sider Navigation */}
-      {user && !isHomePage && (
+      {user && activeRole && !isHomePage && (
       <Sider
         collapsible
         collapsed={collapsed}
@@ -617,7 +655,7 @@ export const AppLayout: React.FC = () => {
 
           {/* Right: Switch Role + Backend Indicator + Bell + User Icon + Avatar + Account ▾ */}
           <Space orientation="horizontal" size={14} align="center">
-            {user ? (
+            {user && profile && activeRole ? (
               <>
                 <Tag
                   color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
@@ -642,8 +680,13 @@ export const AppLayout: React.FC = () => {
                 />
 
                 {/* User Avatar Circle */}
-                <Avatar style={{ backgroundColor: '#4F46E5', verticalAlign: 'middle', fontWeight: 600 }} size={38}>
-                  {user.email?.slice(0, 2).toUpperCase() ?? 'U'}
+                <Avatar
+                  src={profile.avatarUrl || undefined}
+                  alt={profileName}
+                  style={{ backgroundColor: '#4F46E5', verticalAlign: 'middle', fontWeight: 600 }}
+                  size={38}
+                >
+                  {profileInitials(profile.fullName, profile.email)}
                 </Avatar>
 
                 {/* Account ▾ Dropdown Pill */}
@@ -671,12 +714,19 @@ export const AppLayout: React.FC = () => {
               </>
             ) : (
               <>
-                <Button type="text" onClick={() => navigate('/login')} style={{ fontSize: 14, fontWeight: 600 }}>Login</Button>
-                <Button type="primary" onClick={() => navigate('/register/customer')} style={{ fontSize: 14, fontWeight: 600, height: 40, borderRadius: 20, padding: '0 20px' }}>Register</Button>
+                <Button type="text" onClick={() => openRoleSelection('login')} style={{ fontSize: 14, fontWeight: 600 }}>Login</Button>
+                <Button type="primary" onClick={() => openRoleSelection('register')} style={{ fontSize: 14, fontWeight: 600, height: 40, borderRadius: 20, padding: '0 20px' }}>Register</Button>
               </>
             )}
           </Space>
         </Header>
+
+        <RoleSelectionModal
+          open={roleSelectionOpen}
+          action={authAction}
+          onClose={closeRoleSelection}
+          onSelectRole={navigateForRole}
+        />
 
         {/* Page Content Body */}
         <Content
@@ -686,7 +736,7 @@ export const AppLayout: React.FC = () => {
             background: 'transparent',
           }}
         >
-          <Outlet context={{ isBackendHealthy, healthData, checkHealth }} />
+          <Outlet key={user?.id ?? 'anonymous'} context={{ isBackendHealthy, healthData, checkHealth }} />
         </Content>
 
         {/* Light Footer */}

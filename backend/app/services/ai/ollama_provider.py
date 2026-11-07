@@ -9,6 +9,7 @@ from app.core.config import Settings, get_settings
 from app.schemas.ai import AIProviderResponse, ConversationMessage, RequirementDraft
 from app.services.ai.base import (
     AIProviderInvalidResponse,
+    AIProviderResourceError,
     AIProviderTimeout,
     AIProviderUnavailable,
 )
@@ -19,6 +20,43 @@ _REQUEST_TIMEOUT_SECONDS = 60.0
 _CONNECT_TIMEOUT_SECONDS = 5.0
 _MATCH_EXPLANATION_TIMEOUT_SECONDS = 3.0
 _MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024
+
+
+async def _read_response_body(response: httpx.Response) -> bytes:
+    response_body = bytearray()
+    async for chunk in response.aiter_bytes():
+        response_body.extend(chunk)
+        if len(response_body) > _MAX_PROVIDER_RESPONSE_BYTES:
+            raise AIProviderInvalidResponse(
+                "The AI provider returned an invalid response."
+            )
+    return bytes(response_body)
+
+
+def _raise_for_ollama_error(response: httpx.Response, response_body: bytes) -> None:
+    if response.status_code == 404:
+        logger.warning("Ollama returned 404; the configured model may be unavailable.")
+        raise AIProviderUnavailable("The configured AI model is unavailable.")
+    if not response.is_error:
+        return
+
+    logger.warning("Ollama returned HTTP %s.", response.status_code)
+    try:
+        error_payload = json.loads(response_body)
+        error_message = error_payload.get("error", "")
+    except (json.JSONDecodeError, AttributeError):
+        error_message = ""
+
+    if isinstance(error_message, str) and any(
+        marker in error_message.casefold()
+        for marker in ("unable to allocate", "failed to allocate", "out of memory")
+    ):
+        raise AIProviderResourceError(
+            "Ollama could not load the local AI model because available memory is "
+            "insufficient. Close other memory-intensive applications, then retry."
+        )
+    raise AIProviderUnavailable("The AI provider is unavailable.")
+
 
 _SYSTEM_PROMPT = """You help customers describe products for a B2B marketplace.
 Extract requirement facts from every user message in the conversation history and the
@@ -156,20 +194,8 @@ class OllamaProvider:
                         "options": {"temperature": 0.1},
                     },
                 ) as response:
-                    if response.status_code == 404:
-                        logger.warning("Ollama returned 404; the configured model may be unavailable.")
-                        raise AIProviderUnavailable("The configured AI model is unavailable.")
-                    if response.is_error:
-                        logger.warning("Ollama returned HTTP %s.", response.status_code)
-                        raise AIProviderUnavailable("The AI provider is unavailable.")
-
-                    response_body = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        response_body.extend(chunk)
-                        if len(response_body) > _MAX_PROVIDER_RESPONSE_BYTES:
-                            raise AIProviderInvalidResponse(
-                                "The AI provider returned an invalid response."
-                            )
+                    response_body = await _read_response_body(response)
+                    _raise_for_ollama_error(response, response_body)
         except httpx.TimeoutException as exc:
             raise AIProviderTimeout("The AI provider timed out.") from exc
         except httpx.RequestError as exc:
@@ -214,17 +240,8 @@ class OllamaProvider:
                         "options": {"temperature": 0.1},
                     },
                 ) as response:
-                    if response.status_code == 404:
-                        raise AIProviderUnavailable("The configured AI model is unavailable.")
-                    if response.is_error:
-                        raise AIProviderUnavailable("The AI provider is unavailable.")
-                    response_body = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        response_body.extend(chunk)
-                        if len(response_body) > _MAX_PROVIDER_RESPONSE_BYTES:
-                            raise AIProviderInvalidResponse(
-                                "The AI provider returned an invalid response."
-                            )
+                    response_body = await _read_response_body(response)
+                    _raise_for_ollama_error(response, response_body)
         except httpx.TimeoutException as exc:
             raise AIProviderTimeout("The AI provider timed out.") from exc
         except httpx.RequestError as exc:
