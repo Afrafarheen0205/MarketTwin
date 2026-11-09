@@ -1,6 +1,19 @@
 from typing import Literal, Optional
+from decimal import Decimal, InvalidOperation
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+_PROVIDER_PRICE_FIELDS = (
+    "min_target_unit_price",
+    "max_target_unit_price",
+    "target_unit_price",
+    "minimum_target_unit_price",
+    "maximum_target_unit_price",
+    "total_budget",
+    "budget",
+    "derived_max_unit_budget",
+)
 
 
 class ConversationMessage(BaseModel):
@@ -135,9 +148,24 @@ class AIProviderResponse(BaseModel):
     @classmethod
     def assistant_message_must_not_be_blank(cls, value: str) -> str:
         value = value.strip()
-        if not value:
-            raise ValueError("Assistant message cannot be blank.")
+        if not value or value.casefold() in {"null", "none", "undefined"}:
+            raise ValueError("Assistant message must contain meaningful text.")
         return value
+
+    @model_validator(mode="after")
+    def validate_generated_price_values(self) -> "AIProviderResponse":
+        commercial = self.requirement_draft.commercial_constraints
+        for field in _PROVIDER_PRICE_FIELDS:
+            value = commercial.get(field)
+            if value is None:
+                continue
+            try:
+                amount = Decimal(value)
+            except InvalidOperation as exc:
+                raise ValueError(f"{field} must be a positive numeric string.") from exc
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError(f"{field} must be a positive numeric string.")
+        return self
 
 
 class AIConversationResponse(BaseModel):

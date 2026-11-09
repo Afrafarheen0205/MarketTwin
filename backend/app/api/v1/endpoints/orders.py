@@ -23,9 +23,8 @@ async def create_order(payload: Dict[str, Any], current_user=Depends(require_rol
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"Order creation failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Order unavailable. Legacy selections may require review.")
 
 
 @router.get("/customer/orders")

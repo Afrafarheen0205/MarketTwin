@@ -1,16 +1,85 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_client, get_supabase_service_client
 from app.services.demand_mapping import (
     database_row_to_normalized_demand,
     demand_request_to_database_payload,
 )
+from app.services.demand_group_submission_service import try_group_new_demand
 
 EDITABLE_STATUSES = {"Submitted", "Under Review"}
 CANCELLABLE_STATUSES = {"Submitted", "Under Review"}
 logger = logging.getLogger("markettwin.demands")
+_EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+_UUID_PATTERN = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+_SECRET_PATTERN = re.compile(
+    r"(?i)\b(authorization|api[_-]?key|service[_-]?role[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\b\s*[:=]\s*[^,\s;]+"
+)
+_BEARER_PATTERN = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
+_JWT_PATTERN = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
+)
+
+
+class DemandPersistenceError(RuntimeError):
+    def __init__(self, public_message: str, diagnostics: Dict[str, Optional[str]]):
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.diagnostics = diagnostics
+
+
+def _safe_error_field(value: Any) -> Optional[str]:
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return None
+    text = " ".join(str(value).split())
+    text = re.sub(r"\{[^{}]*\}", "[redacted object]", text)
+    text = _SECRET_PATTERN.sub(r"\1=[redacted]", text)
+    text = _BEARER_PATTERN.sub("[redacted authorization]", text)
+    text = _JWT_PATTERN.sub("[redacted token]", text)
+    text = _EMAIL_PATTERN.sub("[redacted email]", text)
+    text = _UUID_PATTERN.sub("[redacted id]", text)
+    return text[:500] or None
+
+
+def _postgrest_diagnostics(error: Exception) -> Dict[str, Optional[str]]:
+    diagnostics = {
+        name: _safe_error_field(getattr(error, name, None))
+        for name in ("code", "message", "details", "hint")
+    }
+    raw_status = getattr(error, "status_code", getattr(error, "status", None))
+    try:
+        status = int(raw_status) if raw_status is not None else None
+    except (TypeError, ValueError):
+        status = None
+    diagnostics["http_status"] = str(status) if status is not None and 100 <= status <= 599 else None
+    return diagnostics
+
+
+def _rpc_failure_message(diagnostics: Dict[str, Optional[str]]) -> str:
+    code = diagnostics.get("code")
+    http_status = diagnostics.get("http_status")
+    if code in {"PGRST202", "PGRST106"}:
+        return (
+            "Demand submission is unavailable because its database RPC is not exposed to PostgREST. "
+            "An administrator should verify migrations 020-021, the public RPC signature and grant, "
+            "and reload the PostgREST schema cache if the migrations are applied."
+        )
+    if http_status == "404":
+        return (
+            "Demand submission received an unexpected database 404. "
+            "An administrator should verify the RPC signature, API schema exposure, and schema cache."
+        )
+    if code == "42501" or http_status in {"401", "403"}:
+        return (
+            "Demand submission is blocked by database permissions. "
+            "An administrator should verify the backend service-role configuration and RPC grant."
+        )
+    return "Demand could not be saved. Your reviewed form has not been cleared; please retry."
 
 
 def _requirement_map(value: Any) -> Dict[str, str]:
@@ -29,24 +98,46 @@ def _client():
     return get_supabase_client()
 
 
-def create_demand(
+async def create_demand(
     customer_id: str,
     payload: Dict[str, Any],
     submission_id: str,
 ) -> Dict[str, Any]:
-    client = _client()
+    client = get_supabase_service_client()
     if client is None:
-        raise RuntimeError("Supabase is not configured.")
+        raise DemandPersistenceError(
+            "Demand submission is unavailable because the backend service-role client is not configured. Contact an administrator.",
+            {
+                "code": "SERVICE_ROLE_CLIENT_UNAVAILABLE",
+                "message": None,
+                "details": None,
+                "hint": None,
+                "http_status": None,
+            },
+        )
     data = demand_request_to_database_payload(customer_id, payload, submission_id)
-    result = client.rpc(
-        "create_customer_demand_v1",
-        {"p_submission_id": submission_id, "p_demand": data},
-    ).execute()
+    try:
+        result = client.rpc(
+            "create_customer_demand_v2",
+            {"p_submission_id": submission_id, "p_demand": data},
+        ).execute()
+    except Exception as exc:
+        diagnostics = _postgrest_diagnostics(exc)
+        raise DemandPersistenceError(_rpc_failure_message(diagnostics), diagnostics) from exc
     demand = result.data
     if isinstance(demand, list):
         demand = demand[0] if demand else None
     if not isinstance(demand, dict) or not demand.get("id") or not demand.get("demand_code"):
         raise RuntimeError("Demand creation failed.")
+    try:
+        demand = await try_group_new_demand(demand, client)
+    except Exception:
+        logger.warning("Demand was saved, but semantic grouping requires review.")
+        demand = {
+            **demand,
+            "grouping_status": "needs_review",
+            "grouping_review_reason": "compatibility_assessment_failed",
+        }
     try:
         client.table("notifications").insert({
             "user_id": customer_id,
@@ -64,7 +155,14 @@ def list_demands(customer_id: str, page: int = 1, page_size: int = 20, status: O
     client = _client()
     if client is None:
         raise RuntimeError("Supabase is not configured.")
-    query = client.table("demands").select("*", count="exact").eq("customer_id", customer_id)
+    query = (
+        client.table("demands")
+        .select(
+            "*,demand_groups(group_reference,participating_demand_count,participants_count)",
+            count="exact",
+        )
+        .eq("customer_id", customer_id)
+    )
     if status:
         query = query.eq("status", status)
     if search:

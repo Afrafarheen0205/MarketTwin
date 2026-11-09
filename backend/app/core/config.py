@@ -57,19 +57,38 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = Field(default="", description="Groq API key for AI features")
     AI_PROVIDER: str = Field(default="ollama", description="AI provider used for requirement conversations")
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama API base URL")
-    OLLAMA_MODEL: str = Field(default="qwen3:4b-instruct-2507-q4_K_M", description="Ollama model used for AI features")
+    OLLAMA_MODEL: str = Field(default="qwen3.5:4b", description="Ollama model used for AI features")
+    OLLAMA_EMBEDDING_BASE_URL: str = Field(
+        default="http://localhost:11434",
+        description="Ollama API base URL used for demand embeddings",
+    )
+    OLLAMA_EMBEDDING_MODEL: str = Field(
+        default="nomic-embed-text",
+        description="Ollama model used for demand embeddings",
+    )
+    OLLAMA_EMBEDDING_VERSION: str = Field(
+        default="v1",
+        min_length=1,
+        description="Version of the demand embedding input format",
+    )
+    OLLAMA_EMBEDDING_TIMEOUT_SECONDS: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+        description="Timeout for Ollama demand embedding requests",
+    )
     BUYORA_CATALOGUE_API_URL: str = Field(
         default="https://buyora-backend-0kae.onrender.com/api/products",
         description="Buyora catalogue API endpoint used for product matching",
     )
     CATALOGUE_API_TIMEOUT_SECONDS: float = Field(
-        default=20.0,
+        default=30.0,
         gt=0,
         le=120,
         description="Timeout for Buyora catalogue requests",
     )
     CATALOGUE_API_TOTAL_TIMEOUT_SECONDS: float = Field(
-        default=24.0,
+        default=75.0,
         gt=0,
         le=180,
         description="Maximum time allowed to retrieve all Buyora catalogue pages",

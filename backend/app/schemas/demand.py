@@ -269,6 +269,12 @@ class DemandUpdateRequest(BaseModel):
 class DemandResponse(BaseModel):
     id: str
     customer_id: Optional[str]
+    group_id: Optional[str] = None
+    group_reference: Optional[str] = None
+    grouping_status: Optional[str] = None
+    grouping_review_reason: Optional[str] = None
+    participating_demand_count: Optional[int] = None
+    participants_count: Optional[int] = None
     demand_code: Optional[str] = None
     product_name: str
     category: Optional[str] = None

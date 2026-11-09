@@ -14,7 +14,11 @@ from app.schemas.product import (
 from app.schemas.product_matching import ProductMatchingResponse
 from app.services.product_service import ProductService
 from app.services.product_matching_service import ProductMatchingService
-from app.services.buyora_catalogue_service import CatalogueTimeout, CatalogueUnavailable
+from app.services.buyora_catalogue_service import (
+    CatalogueInvalidResponse,
+    CatalogueTimeout,
+    CatalogueUnavailable,
+)
 
 logger = logging.getLogger("markettwin.api.products")
 router = APIRouter()
@@ -141,13 +145,23 @@ async def match_product_specifications(
         except CatalogueTimeout as exc:
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="The product catalogue took too long to respond.",
+                detail="The product catalogue is taking longer than expected. Please try again shortly.",
             ) from exc
-        except CatalogueUnavailable as exc:
-            logger.warning("Product matching could not load the Buyora catalogue.")
+        except CatalogueInvalidResponse as exc:
+            logger.warning("Product matching received invalid Buyora catalogue data.")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="The product catalogue is unavailable or returned invalid data.",
+                detail="The product catalogue returned an invalid response. Please try again later.",
+            ) from exc
+        except CatalogueUnavailable as exc:
+            failure_type = type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
+            logger.warning(
+                "Product matching could not load the Buyora catalogue (%s).",
+                failure_type,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The product catalogue is temporarily unavailable. Please try again shortly.",
             ) from exc
 
     try:

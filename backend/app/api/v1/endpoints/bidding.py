@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_current_user, require_roles
-from app.schemas.bidding import OfferSubmitRequest, OpenBiddingRequest
+from app.schemas.bidding import MerchantOfferListResponse, MerchantOfferResponse, OfferReviseRequest, OfferSubmitRequest, OpenBiddingRequest
 from app.services.bidding_service import (
     close_bidding,
     get_group,
@@ -13,6 +13,8 @@ from app.services.bidding_service import (
     merchant_is_approved,
     open_bidding,
     submit_offer,
+    revise_offer,
+    OfferConflict,
 )
 
 logger = logging.getLogger("markettwin.api.bidding")
@@ -36,21 +38,36 @@ async def merchant_demand_group_detail(group_id: str, current_user=Depends(requi
     return {"group": group}
 
 
-@router.post("/merchant/demand-groups/{group_id}/offers", status_code=status.HTTP_201_CREATED)
+@router.post("/merchant/demand-groups/{group_id}/offers", status_code=status.HTTP_201_CREATED, response_model=MerchantOfferResponse)
 async def merchant_submit_offer(group_id: str, payload: OfferSubmitRequest, current_user=Depends(require_roles("merchant"))):
     if not merchant_is_approved(current_user["id"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
     try:
         offer = submit_offer(current_user["id"], group_id, payload.model_dump())
         return offer
+    except OfferConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"Offer submission failed: {exc}", exc_info=True)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Offer submission is unavailable. Refresh My Offers before retrying.")
+
+
+@router.patch("/merchant/offers/{offer_id}", response_model=MerchantOfferResponse)
+async def merchant_revise_offer(offer_id: str, payload: OfferReviseRequest, current_user=Depends(require_roles("merchant"))):
+    if not merchant_is_approved(current_user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")
+    try:
+        return revise_offer(current_user["id"], offer_id, payload.model_dump())
+    except OfferConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Offer revision is unavailable. Refresh My Offers before retrying.")
 
 
-@router.get("/merchant/offers")
+@router.get("/merchant/offers", response_model=MerchantOfferListResponse)
 async def merchant_offers(current_user=Depends(require_roles("merchant"))):
     if not merchant_is_approved(current_user["id"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Merchant account is not approved.")

@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import List, Optional
 
 from uuid import UUID
@@ -16,6 +17,7 @@ from app.schemas.demand import (
 )
 from app.schemas.demand_analysis import DemandAnalysisResponse
 from app.services.demand_service import (
+    DemandPersistenceError,
     add_attachment,
     cancel_demand,
     create_demand,
@@ -52,12 +54,21 @@ async def create_customer_demand(
             detail="An idempotency key is required for demand submission.",
         )
     try:
-        demand = create_demand(
+        demand = await create_demand(
             current_user["id"],
             payload.model_dump(mode="json"),
             str(idempotency_key),
         )
         return _to_response(demand)
+    except DemandPersistenceError as exc:
+        logger.error(
+            "Demand persistence RPC failure: %s",
+            json.dumps(exc.diagnostics, sort_keys=True),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.public_message,
+        ) from exc
     except Exception as exc:
         logger.error(
             "Demand persistence operation failed.",

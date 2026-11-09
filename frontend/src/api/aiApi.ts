@@ -94,7 +94,7 @@ export const sendAIConversationMessage = async (
   const response = await axiosClient.post<AIConversationResponse>(
     '/api/v1/ai/conversation',
     payload,
-    { timeout: 75000 }
+    { timeout: 520000 }
   );
   return response.data;
 };
@@ -105,7 +105,7 @@ export const matchProductsToRequirements = async (
   const response = await axiosClient.post<ProductMatchingResponse>(
     '/api/products/match',
     requirementDraft,
-    { timeout: 75000 }
+    { timeout: 120000 }
   );
   return response.data;
 };

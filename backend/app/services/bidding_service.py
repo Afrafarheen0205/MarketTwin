@@ -1,7 +1,10 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from uuid import uuid4
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_client, get_supabase_service_client
+from app.schemas.bidding import OfferReviseRequest, OfferSubmitRequest
+from app.services.demand_group_merge_service import resolve_group_id
 
 
 def _client():
@@ -40,81 +43,65 @@ def get_group(group_id: str) -> Optional[Dict[str, Any]]:
     client = _client()
     if client is None:
         return None
-    res = client.table("demand_groups").select("*").eq("id", group_id).single().execute()
+    canonical_group_id = resolve_group_id(group_id, client=client)
+    res = client.table("demand_groups").select("*").eq("id", canonical_group_id).single().execute()
     return res.data
 
 
-def submit_offer(merchant_id: str, group_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    client = _client()
+class OfferConflict(ValueError):
+    pass
+
+
+def _offer_rpc(name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    client = get_supabase_service_client()
     if client is None:
-        raise RuntimeError("Supabase is not configured.")
-    # check group open
-    group = get_group(group_id)
-    if not group or group.get("bidding_status") != "open":
-        raise ValueError("Group is not open for bidding.")
-    deadline = group.get("bidding_deadline")
-    if deadline and deadline < datetime.now(timezone.utc).isoformat():
-        raise ValueError("Bidding deadline has passed.")
-    # prevent duplicate
-    existing = client.table("merchant_offers").select("id").eq("group_id", group_id).eq("merchant_id", merchant_id).execute()
-    if existing.data:
-        raise ValueError("An offer already exists for this group.")
-    data = {
-        "offer_reference": f"OFF-{group_id[:6]}-{merchant_id[:6]}",
-        "group_id": group_id,
-        "merchant_id": merchant_id,
-        "offered_product_name": payload.get("offered_product_name"),
-        "brand": payload.get("brand"),
-        "model_number": payload.get("model_number"),
-        "description": payload.get("description"),
-        "material": payload.get("material"),
-        "material_grade": payload.get("material_grade"),
-        "specifications": payload.get("specifications", {}),
-        "certifications": payload.get("certifications", []),
-        "compliance_status": "Requires Manual Review",
-        "compliance_notes": payload.get("compliance_notes"),
-        "offered_unit_price": payload.get("offered_unit_price"),
-        "currency": payload.get("currency", "USD"),
-        "tax_amount": payload.get("tax_amount", 0),
-        "additional_charges": payload.get("additional_charges", 0),
-        "shipping_cost": payload.get("shipping_cost", 0),
-        "final_quoted_amount": payload.get("final_quoted_amount"),
-        "minimum_order_quantity": payload.get("minimum_order_quantity"),
-        "available_quantity": payload.get("available_quantity"),
-        "production_lead_time": payload.get("production_lead_time"),
-        "dispatch_lead_time": payload.get("dispatch_lead_time"),
-        "delivery_lead_time": payload.get("delivery_lead_time"),
-        "delivery_terms": payload.get("delivery_terms"),
-        "offer_valid_until": payload.get("offer_valid_until"),
-        "merchant_remarks": payload.get("merchant_remarks"),
-        "offer_status": "Submitted",
-        "demand_id": None,
-        "demand_title": group.get("product_title"),
-        "merchant_name": payload.get("merchant_name"),
-        "merchant_rating": payload.get("merchant_rating", 0),
-        "unit_price": payload.get("offered_unit_price"),
-        "original_target_price": None,
-        "total_offer_amount": payload.get("final_quoted_amount"),
-        "min_order_quantity": payload.get("minimum_order_quantity"),
-        "delivery_days": payload.get("delivery_lead_time"),
-        "warranty_months": None,
-        "spec_notes": payload.get("compliance_notes"),
-        "shipping_terms": payload.get("delivery_terms"),
-    }
-    # remove None values not needed? keep
-    result = client.table("merchant_offers").insert(data).execute()
-    if not result.data:
-        raise RuntimeError("Offer submission failed.")
-    offer = result.data[0]
-    # status history
-    client.table("offer_status_history").insert({
-        "offer_id": offer["id"],
-        "previous_status": None,
-        "new_status": "Submitted",
-        "changed_by": merchant_id,
-        "remarks": "Offer submitted",
-    }).execute()
-    return offer
+        raise RuntimeError("Offer operations are unavailable.")
+    try:
+        result = client.rpc(name, parameters).execute()
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        message = getattr(exc, "message", None)
+        conflicts = {
+            "OFFER_DUPLICATE": "An offer already exists for this group. Refresh My Offers.",
+            "OFFER_NOT_REVISABLE": "This offer can no longer be revised.",
+            "OFFER_STALE_PRICE": "The price changed. Refresh the offer before revising.",
+            "OFFER_STALE_QUANTITY": "Your demand quantity changed. Refresh before accepting.",
+            "OFFER_GROUP_CLOSED": "The group is not open for bidding.",
+            "OFFER_ALREADY_SELECTED": "Another offer has already been selected for this demand.",
+            "OFFER_NOT_ACTIVE": "This offer is no longer available for acceptance.",
+            "OFFER_LEGACY_QUANTITY": "This legacy offer has no verified quote quantity and cannot be revised.",
+            "OFFER_CURRENCY_MISMATCH": "The offer currency does not match the demand currency.",
+        }
+        if code == "23505":
+            raise OfferConflict("An offer already exists. Refresh My Offers.") from exc
+        if code == "P0001" and message in conflicts:
+            raise OfferConflict(conflicts[message]) from exc
+        if code == "P0001" and message == "OFFER_INVALID_TERMS":
+            raise ValueError("Offer terms are invalid for this group.") from exc
+        raise RuntimeError("Offer operations are unavailable. No REST fallback was attempted.") from exc
+    if not isinstance(result.data, dict) or not result.data.get("id"):
+        raise RuntimeError("Offer operation returned an invalid response. Refresh before retrying.")
+    return result.data
+
+
+def submit_offer(merchant_id: str, group_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    request = OfferSubmitRequest.model_validate(payload)
+    return _offer_rpc("submit_merchant_offer_v1", {
+        "p_merchant_id": merchant_id,
+        "p_group_id": group_id,
+        "p_offer_code": f"OFF-{uuid4().hex.upper()}",
+        "p_terms": request.model_dump(mode="json"),
+    })
+
+
+def revise_offer(merchant_id: str, offer_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    request = OfferReviseRequest.model_validate(payload)
+    return _offer_rpc("revise_merchant_offer_v1", {
+        "p_merchant_id": merchant_id,
+        "p_offer_id": offer_id,
+        "p_unit_price": str(request.unit_price),
+        "p_expected_unit_price": str(request.expected_unit_price),
+    })
 
 
 def list_merchant_offers(merchant_id: str) -> List[Dict[str, Any]]:

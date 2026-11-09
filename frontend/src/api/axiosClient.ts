@@ -33,6 +33,29 @@ axiosClient.interceptors.request.use(
       // Fallback silently if session retrieval fails
     }
 
+    if (
+      import.meta.env.DEV &&
+      config.method?.toLowerCase() === 'post' &&
+      config.url === '/api/v1/customer/demands'
+    ) {
+      const authorization = String(config.headers.Authorization ?? '');
+      const bearerToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+      if (bearerToken && globalThis.crypto?.subtle) {
+        try {
+          const digest = await globalThis.crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(bearerToken)
+          );
+          config.headers['X-Diagnostic-Token-Sha256'] = Array.from(
+            new Uint8Array(digest),
+            (byte) => byte.toString(16).padStart(2, '0')
+          ).join('');
+        } catch {
+          // Diagnostics must not block demand submission.
+        }
+      }
+    }
+
     return config;
   },
   (error: AxiosError) => {
@@ -46,7 +69,7 @@ axiosClient.interceptors.response.use(
   (response: AxiosResponse) => {
     return response;
   },
-  (error: AxiosError<{ message?: string; detail?: string | { msg: string }[] }>) => {
+  (error: AxiosError<{ message?: string; detail?: string | { msg: string }[]; error?: string }>) => {
     let friendlyMessage = 'An unexpected error occurred. Please try again.';
 
     if (error.response) {
@@ -58,6 +81,8 @@ axiosClient.interceptors.response.use(
         friendlyMessage = data.detail.map((err) => err.msg).join(', ');
       } else if (data?.message) {
         friendlyMessage = data.message;
+      } else if (data?.error) {
+        friendlyMessage = data.error;
       } else {
         friendlyMessage = `Server error (${error.response.status}).`;
       }

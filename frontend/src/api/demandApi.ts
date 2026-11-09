@@ -1,4 +1,5 @@
 import axiosClient from './axiosClient';
+import { supabase } from '../services/supabase';
 
 export interface DemandSpecification {
   name: string;
@@ -38,6 +39,10 @@ export type DemandUpdatePayload = Partial<DemandCreatePayload>;
 export interface DemandRecord {
   id: string;
   customer_id: string | null;
+  group_id?: string | null;
+  group_reference?: string | null;
+  participating_demand_count?: number | null;
+  participants_count?: number | null;
   demand_code?: string | null;
   product_name: string;
   category?: string | null;
@@ -134,10 +139,23 @@ export interface DemandAnalysisResponse {
 
 export const demandApi = {
   createDemand: async (payload: DemandCreatePayload, idempotencyKey: string) => {
+    const sessionResult = await supabase?.auth.getSession();
+    const accessToken = sessionResult?.data.session?.access_token;
+    if (sessionResult?.error || !accessToken) {
+      const error = new Error('Your customer session has expired. Sign in again before submitting your demand.') as Error & { status: number };
+      error.status = 401;
+      throw error;
+    }
+
     const res = await axiosClient.post<DemandRecord>(
       '/api/v1/customer/demands',
       payload,
-      { headers: { 'Idempotency-Key': idempotencyKey } }
+      {
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
     );
     return res.data;
   },

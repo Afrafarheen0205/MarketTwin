@@ -1,5 +1,8 @@
 from decimal import Decimal
+import re
 from typing import Any, Dict, Optional
+import unicodedata
+from app.services.demand_family_taxonomy import canonical_demand_family
 
 
 def _jsonable(value: Any) -> Any:
@@ -10,6 +13,29 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [_jsonable(item) for item in value]
     return value
+
+
+_PRODUCT_FAMILY_DETAILS = re.compile(
+    r"\b(?:with|featuring|including|equipped\s+with|having)\b.*$",
+    re.IGNORECASE,
+)
+_PRODUCT_FAMILY_COLORS = re.compile(
+    r"\b(?:black|blue|brown|gold|gray|green|grey|orange|pink|purple|red|"
+    r"silver|white|yellow)\b",
+    re.IGNORECASE,
+)
+
+
+def product_family_key(product_name: str) -> str:
+    family = unicodedata.normalize("NFKC", product_name).casefold()
+    family = _PRODUCT_FAMILY_DETAILS.sub("", family)
+    family = _PRODUCT_FAMILY_COLORS.sub(" ", family)
+    family = re.sub(r"[^a-z0-9]+", " ", family)
+    family = " ".join(family.split())
+    return {"smart watches": "smartwatch", "smartwatches": "smartwatch"}.get(
+        family,
+        family,
+    )
 
 
 def _specification_sets(payload: Dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -71,6 +97,7 @@ def _normalized_requirements(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _jsonable({
         "extraction_version": "v1",
         "product_type": payload["product_name"],
+        "product_family_key": product_family_key(payload["product_name"]),
         "normalized_product_name": payload["product_name"],
         "normalized_category": payload["category"],
         "normalized_material": payload.get("material"),
@@ -98,6 +125,10 @@ def demand_request_to_database_payload(
     payload: Dict[str, Any],
     submission_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    canonical_family = canonical_demand_family(
+        payload["product_name"],
+        payload["category"],
+    )
     database_payload = {
         "customer_id": customer_id,
         "title": payload["product_name"],
@@ -117,6 +148,10 @@ def demand_request_to_database_payload(
         "delivery_address": payload.get("delivery_address") or {},
         "additional_requirements": payload.get("additional_requirements"),
         "status": "Submitted",
+        "canonical_product_family_key": (
+            canonical_family.product_family_key if canonical_family else None
+        ),
+        "canonical_category_key": canonical_family.category_key if canonical_family else None,
         "normalized_requirements": _normalized_requirements(payload),
     }
     if submission_id is not None:
@@ -125,9 +160,20 @@ def demand_request_to_database_payload(
 
 
 def database_row_to_api_response(row: Dict[str, Any]) -> Dict[str, Any]:
+    group = row.get("demand_groups")
+    if isinstance(group, list):
+        group = group[0] if group else None
+    if not isinstance(group, dict):
+        group = {}
     return {
         "id": str(row["id"]),
         "customer_id": str(row["customer_id"]) if row.get("customer_id") else None,
+        "group_id": str(row["group_id"]) if row.get("group_id") else None,
+        "grouping_status": row.get("grouping_status"),
+        "grouping_review_reason": row.get("grouping_review_reason"),
+        "group_reference": group.get("group_reference"),
+        "participating_demand_count": group.get("participating_demand_count"),
+        "participants_count": group.get("participants_count"),
         "demand_code": row.get("demand_code"),
         "product_name": row.get("title"),
         "category": row.get("category"),

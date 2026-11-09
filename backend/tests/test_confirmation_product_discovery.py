@@ -14,6 +14,8 @@ from app.services.buyora_catalogue_service import (
     BuyoraCatalogueService,
     CatalogueProduct,
     CatalogueSnapshot,
+    CatalogueInvalidResponse,
+    CatalogueTimeout,
     CatalogueUnavailable,
 )
 from app.services.product_matching_service import (
@@ -242,6 +244,33 @@ def test_catalogue_service_rejects_invalid_api_shape():
     )
 
     with pytest.raises(CatalogueUnavailable):
+        run(service.fetch_products)
+
+
+def test_catalogue_service_rejects_invalid_json():
+    service = BuyoraCatalogueService(
+        _settings(),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, content=b"not-json")
+        ),
+    )
+
+    with pytest.raises(CatalogueInvalidResponse):
+        run(service.fetch_products)
+
+
+def test_catalogue_service_rejects_catalogue_with_only_invalid_products():
+    service = BuyoraCatalogueService(
+        _settings(),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={"success": True, "products": [{"name": "Missing product ID"}]},
+            )
+        ),
+    )
+
+    with pytest.raises(CatalogueInvalidResponse):
         run(service.fetch_products)
 
 
@@ -1059,6 +1088,46 @@ def test_existing_product_match_route_accepts_requirement_draft(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "no_exact_matches"
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_detail"),
+    [
+        (
+            CatalogueUnavailable,
+            503,
+            "The product catalogue is temporarily unavailable. Please try again shortly.",
+        ),
+        (
+            CatalogueTimeout,
+            504,
+            "The product catalogue is taking longer than expected. Please try again shortly.",
+        ),
+        (
+            CatalogueInvalidResponse,
+            502,
+            "The product catalogue returned an invalid response. Please try again later.",
+        ),
+    ],
+)
+def test_product_match_route_returns_clear_catalogue_errors(
+    monkeypatch,
+    failure,
+    expected_status: int,
+    expected_detail: str,
+):
+    async def fail_match(_: RequirementDraft) -> ProductMatchingResponse:
+        raise failure("internal upstream detail")
+
+    class _Service:
+        match = staticmethod(fail_match)
+
+    monkeypatch.setattr(products_endpoint, "ProductMatchingService", _Service)
+    response = TestClient(app).post("/api/products/match", json=_draft().model_dump())
+
+    assert response.status_code == expected_status
+    assert response.json()["error"] == expected_detail
+    assert "internal upstream detail" not in response.text
 
 
 def test_existing_product_match_route_keeps_legacy_demand_request_dispatch(monkeypatch):

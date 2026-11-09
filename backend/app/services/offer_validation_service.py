@@ -1,12 +1,22 @@
 from typing import Any, Dict, List
-from datetime import datetime, timezone
-import uuid
+from decimal import Decimal, InvalidOperation
 
 from app.core.supabase import get_supabase_client
+from app.services.bidding_service import _offer_rpc
+from app.services.demand_group_merge_service import resolve_group_id, resolve_group_ids
 
 
 def _client():
     return get_supabase_client()
+
+
+def _require_offer_group_id(client) -> None:
+    try:
+        client.table("merchant_offers").select("group_id").limit(0).execute()
+    except Exception as exc:
+        raise RuntimeError(
+            "Offer validation is unavailable: merchant_offers.group_id is missing from the deployed schema."
+        ) from exc
 
 
 def get_customer_demands(customer_id: str) -> List[Dict[str, Any]]:
@@ -17,111 +27,92 @@ def get_customer_demands(customer_id: str) -> List[Dict[str, Any]]:
     return res.data or []
 
 
-def get_offers_for_customer(customer_id: str) -> List[Dict[str, Any]]:
+def get_offers_for_customer(customer_id: str, demand_id: str | None = None) -> List[Dict[str, Any]]:
     client = _client()
     if client is None:
         return []
     demands = get_customer_demands(customer_id)
+    if demand_id is not None:
+        demands = [demand for demand in demands if demand["id"] == demand_id]
     demand_ids = [d["id"] for d in demands]
     if not demand_ids:
         return []
-    # find groups containing these demands
-    members = client.table("demand_group_members").select("group_id,demand_id").in_("demand_id", demand_ids).execute()
-    group_ids = list({m["group_id"] for m in (members.data or [])})
-    if not group_ids:
-        return []
-    offers = client.table("merchant_offers").select("*").in_("group_id", group_ids).execute()
-    return offers.data or []
+    _require_offer_group_id(client)
+    members = client.table("demand_group_members").select("group_id").eq("customer_id", customer_id).eq("membership_status", "active").is_("removed_at", "null").execute()
+    group_ids = sorted({member["group_id"] for member in (members.data or [])} | {demand["group_id"] for demand in demands if demand.get("group_id")})
+    resolved = resolve_group_ids(group_ids, client=client) if group_ids else {}
+    member_groups = {resolved[member["group_id"]] for member in (members.data or [])}
+    offers = client.table("merchant_offers").select("*").in_("demand_id", demand_ids).execute().data or []
+    if member_groups:
+        offers += client.table("merchant_offers").select("*").in_("group_id", sorted(member_groups)).execute().data or []
+    unique_offers = {offer["id"]: offer for offer in offers}
+    result = []
+    for demand in demands:
+        demand_group = resolved.get(demand.get("group_id"))
+        for offer in unique_offers.values():
+            if offer.get("demand_id"):
+                associated = offer["demand_id"] == demand["id"]
+            else:
+                associated = bool(demand_group and demand_group in member_groups and offer.get("group_id") == demand_group)
+            if associated:
+                eligibility = evaluate_offer(demand, offer)
+                result.append({**offer, "customer_demand_id": demand["id"],
+                    "customer_quantity": demand.get("target_quantity"), "eligibility": eligibility})
+    return result
+
+
+def evaluate_offer(demand: Dict[str, Any], offer: Dict[str, Any]) -> Dict[str, Any]:
+    checks = []
+    quantity = demand.get("target_quantity")
+    if offer.get("status") not in ("Submitted", "Under Review"):
+        checks.append("Offer is not active.")
+    if not offer.get("merchant_id"):
+        checks.append("Merchant is unavailable.")
+    try:
+        quantity_value = Decimal(str(quantity)) if not isinstance(quantity, bool) else Decimal("NaN")
+        if not quantity_value.is_finite() or quantity_value <= 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError, TypeError):
+        checks.append("Demand quantity is invalid.")
+    else:
+        minimum_quantity = offer.get("min_order_quantity")
+        if minimum_quantity is not None:
+            try:
+                minimum_value = Decimal(str(minimum_quantity))
+                if not minimum_value.is_finite() or minimum_value <= 0:
+                    raise InvalidOperation
+                if quantity_value < minimum_value:
+                    checks.append("Offer minimum quantity exceeds demand quantity.")
+            except (InvalidOperation, ValueError, TypeError):
+                checks.append("Offer minimum quantity is invalid.")
+    try:
+        price = Decimal(str(offer.get("unit_price")))
+        if not price.is_finite() or price <= 0:
+            checks.append("Offer price is invalid.")
+    except InvalidOperation:
+        checks.append("Offer price is invalid.")
+    return {"status": "Not Eligible" if checks else "Eligible", "details": {"checks": checks}}
 
 
 def validate_offer(customer_id: str, demand_id: str, offer_id: str) -> Dict[str, Any]:
     client = _client()
     if client is None:
         raise RuntimeError("Supabase is not configured.")
+    _require_offer_group_id(client)
     demand = client.table("demands").select("*").eq("id", demand_id).eq("customer_id", customer_id).single().execute()
     if not demand.data:
         raise PermissionError("Demand not found.")
-    offer = client.table("merchant_offers").select("*").eq("id", offer_id).single().execute()
-    if not offer.data:
-        raise ValueError("Offer not found.")
-    # basic eligibility
-    status = "Eligible"
-    details = {"checks": []}
-    # deadline
-    group = None
-    if offer.data.get("group_id"):
-        g = client.table("demand_groups").select("*").eq("id", offer.data["group_id"]).single().execute()
-        group = g.data
-    if offer.data.get("offer_status") != "Submitted" and offer.data.get("offer_status") != "Under Review":
-        status = "Not Eligible"
-        details["checks"].append("Offer not active.")
-    if offer.data.get("offer_valid_until"):
-        if offer.data["offer_valid_until"] < datetime.now(timezone.utc).date().isoformat():
-            status = "Not Eligible"
-            details["checks"].append("Offer expired.")
-    # customer quantity check
-    qty = demand.data.get("quantity")
-    min_qty = offer.data.get("minimum_order_quantity") or offer.data.get("min_order_quantity")
-    if min_qty and qty and qty < min_qty:
-        status = "Not Eligible"
-        details["checks"].append("Offer minimum quantity exceeds demand quantity.")
-    # store eligibility
-    client.table("customer_offer_eligibility").upsert({
-        "customer_id": customer_id,
-        "demand_id": demand_id,
-        "offer_id": offer_id,
-        "eligibility_status": status,
-        "validation_details": details,
-        "validation_version": "v1",
-    }, on_conflict="customer_id,demand_id,offer_id").execute()
-    return {"status": status, "details": details, "offer": offer.data, "demand": demand.data, "group": group}
+    offer = next((offer for offer in get_offers_for_customer(customer_id, demand_id) if offer["id"] == offer_id), None)
+    if offer is None:
+        raise PermissionError("Offer not found for this demand.")
+    return {**offer["eligibility"], "offer": offer, "demand": demand.data}
 
 
-def select_offer(customer_id: str, demand_id: str, offer_id: str, terms_accepted: bool) -> Dict[str, Any]:
-    client = _client()
-    if client is None:
-        raise RuntimeError("Supabase is not configured.")
-    if not terms_accepted:
+def select_offer(customer_id: str, demand_id: str, offer_id: str, terms_accepted: bool, expected_unit_price: Decimal, expected_quantity: Decimal) -> Dict[str, Any]:
+    if terms_accepted is not True:
         raise ValueError("Terms must be accepted.")
-    # prevent duplicate
-    existing = client.table("customer_offer_selections").select("id").eq("customer_id", customer_id).eq("demand_id", demand_id).execute()
-    if existing.data:
-        raise ValueError("Offer already selected for this demand.")
-    elig = validate_offer(customer_id, demand_id, offer_id)
-    if elig["status"] == "Not Eligible":
-        raise ValueError("Offer is not eligible.")
-    offer = elig["offer"]
-    demand = elig["demand"]
-    group = elig["group"]
-    quantity = demand.get("quantity") or 1
-    unit_price = offer.get("offered_unit_price") or offer.get("unit_price") or 0
-    taxes = offer.get("tax_amount") or 0
-    shipping = offer.get("shipping_cost") or 0
-    additional = offer.get("additional_charges") or 0
-    total = quantity * unit_price + taxes + shipping + additional
-    import uuid
-    selection_ref = f"SEL-{uuid.uuid4().hex[:8].upper()}"
-    payload = {
-        "selection_reference": selection_ref,
-        "customer_id": customer_id,
-        "demand_id": demand_id,
-        "group_id": group.get("id") if group else None,
-        "offer_id": offer_id,
-        "merchant_id": offer.get("merchant_id"),
-        "selected_quantity": quantity,
-        "selected_unit": demand.get("unit") or "units",
-        "agreed_unit_price": unit_price,
-        "currency": offer.get("currency") or "USD",
-        "agreed_taxes": taxes,
-        "agreed_shipping_cost": shipping,
-        "agreed_additional_charges": additional,
-        "estimated_total": total,
-        "delivery_terms_snapshot": {"delivery_terms": offer.get("delivery_terms"), "delivery_lead_time": offer.get("delivery_lead_time")},
-        "product_terms_snapshot": {"product_name": offer.get("offered_product_name"), "material": offer.get("material")},
-        "compliance_snapshot": elig["details"],
-        "selection_status": "Selected",
-    }
-    result = client.table("customer_offer_selections").insert(payload).execute()
-    if not result.data:
-        raise RuntimeError("Selection failed.")
-    return result.data[0]
+    return _offer_rpc("accept_merchant_offer_v1", {
+        "p_customer_id": customer_id, "p_demand_id": demand_id, "p_offer_id": offer_id,
+        "p_terms_accepted": True, "p_expected_unit_price": str(expected_unit_price),
+        "p_expected_quantity": str(expected_quantity),
+    })

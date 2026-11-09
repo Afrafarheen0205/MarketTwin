@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Optional, Sequence
 
 import httpx
@@ -16,10 +17,52 @@ from app.services.ai.base import (
 
 logger = logging.getLogger("markettwin.ai.ollama")
 
-_REQUEST_TIMEOUT_SECONDS = 60.0
+_REQUEST_TIMEOUT_SECONDS = 250.0
 _CONNECT_TIMEOUT_SECONDS = 5.0
 _MATCH_EXPLANATION_TIMEOUT_SECONDS = 3.0
 _MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024
+_MAX_STRUCTURED_RESPONSE_ATTEMPTS = 2
+_PRICE_VALUE_FIELDS = (
+    "min_target_unit_price",
+    "max_target_unit_price",
+    "target_unit_price",
+    "minimum_target_unit_price",
+    "maximum_target_unit_price",
+    "total_budget",
+    "budget",
+    "derived_max_unit_budget",
+)
+_BRACED_NUMERIC_AMOUNT = re.compile(r"^\{\s*(\d+(?:\.\d+)?)\s*\}$")
+_STRUCTURED_RESPONSE_RETRY_INSTRUCTION = (
+    "Your previous response did not pass structured response validation. Return the "
+    "complete response as one JSON object matching the supplied schema. Use a meaningful "
+    "assistant_message, never the text null, none, or undefined. Monetary amounts must be "
+    "plain positive numeric strings without braces, currency symbols, or separators. Do "
+    "not put the same key in both mandatory_requirements and optional_preferences; classify "
+    "it according to the user's wording. Omit keys with missing or empty values, and "
+    "preserve every non-empty user-stated fact."
+)
+
+
+def _normalize_provider_response(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return payload
+    draft = payload.get("requirement_draft")
+    if not isinstance(draft, dict):
+        return payload
+    preferences = draft.get("optional_preferences")
+    if isinstance(preferences, dict):
+        for key, value in list(preferences.items()):
+            if isinstance(value, str) and not value.strip():
+                preferences.pop(key)
+    commercial = draft.get("commercial_constraints")
+    if not isinstance(commercial, dict):
+        return payload
+    for field in _PRICE_VALUE_FIELDS:
+        value = commercial.get(field)
+        if isinstance(value, str) and (match := _BRACED_NUMERIC_AMOUNT.fullmatch(value)):
+            commercial[field] = match.group(1)
+    return payload
 
 
 async def _read_response_body(response: httpx.Response) -> bytes:
@@ -72,6 +115,8 @@ measurement unit. Do not silently omit specifications because they are unfamilia
 Place required or requested attributes in mandatory_requirements. Place attributes only
 described as preferences, likes, or nice-to-haves in optional_preferences. A request such
 as "I want heart rate monitoring" is a requirement, while "I prefer Noise" is a preference.
+Use each requirement key in only one of those dictionaries, and omit keys with missing or
+empty values instead of returning empty strings.
 Store recommendation/presentation requests such as "similar alternatives" in
 optional_preferences.recommendation_style, never in delivery_constraints. Store a concise
 application phrase such as "Professional use" in optional_preferences.application; do not
@@ -178,39 +223,74 @@ class OllamaProvider:
             connect=_CONNECT_TIMEOUT_SECONDS,
         )
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=timeout,
-                transport=self._transport,
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self._settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat",
-                    json={
-                        "model": self._settings.OLLAMA_MODEL,
-                        "messages": ollama_messages,
-                        "format": AIProviderResponse.model_json_schema(),
-                        "stream": False,
-                        "options": {"temperature": 0.1},
-                    },
-                ) as response:
-                    response_body = await _read_response_body(response)
-                    _raise_for_ollama_error(response, response_body)
-        except httpx.TimeoutException as exc:
-            raise AIProviderTimeout("The AI provider timed out.") from exc
-        except httpx.RequestError as exc:
-            raise AIProviderUnavailable("The AI provider is unavailable.") from exc
+        for attempt in range(_MAX_STRUCTURED_RESPONSE_ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=timeout,
+                    transport=self._transport,
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self._settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat",
+                        json={
+                            "model": self._settings.OLLAMA_MODEL,
+                            "messages": ollama_messages,
+                            "format": AIProviderResponse.model_json_schema(),
+                            "stream": False,
+                            "think": False,
+                            "options": {"temperature": 0.1},
+                        },
+                    ) as response:
+                        response_body = await _read_response_body(response)
+                        _raise_for_ollama_error(response, response_body)
+            except httpx.TimeoutException as exc:
+                raise AIProviderTimeout("The AI provider timed out.") from exc
+            except httpx.RequestError as exc:
+                raise AIProviderUnavailable("The AI provider is unavailable.") from exc
 
-        try:
-            provider_payload = json.loads(response_body)
-            content = provider_payload["message"]["content"]
-            if not isinstance(content, str) or not content.strip():
-                raise ValueError("Empty model response.")
-            parsed = json.loads(content)
-            return AIProviderResponse.model_validate(parsed)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError) as exc:
-            logger.warning("Ollama returned an invalid structured response.")
-            raise AIProviderInvalidResponse("The AI provider returned an invalid response.") from exc
+            try:
+                provider_payload = json.loads(response_body)
+                content = provider_payload["message"]["content"]
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("Empty model response.")
+                parsed = _normalize_provider_response(json.loads(content))
+                return AIProviderResponse.model_validate(parsed)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError) as exc:
+                if isinstance(exc, ValidationError):
+                    validation_details = sorted({
+                        f"{'.'.join(str(part) for part in error['loc']) or 'response'}: {error['msg']}"
+                        for error in exc.errors(include_input=False)
+                    })
+                    failure = "schema validation failed"
+                    if validation_details:
+                        failure += f" ({'; '.join(validation_details)})"
+                elif isinstance(exc, json.JSONDecodeError):
+                    failure = f"invalid JSON at offset {exc.pos}"
+                elif isinstance(exc, KeyError):
+                    failure = "missing expected response field"
+                else:
+                    failure = "empty or invalid structured content"
+                logger.warning(
+                    "Ollama returned invalid structured response (attempt %s/%s; %s).",
+                    attempt + 1,
+                    _MAX_STRUCTURED_RESPONSE_ATTEMPTS,
+                    failure,
+                )
+                if attempt + 1 == _MAX_STRUCTURED_RESPONSE_ATTEMPTS:
+                    raise AIProviderInvalidResponse(
+                        "The AI provider returned an invalid structured response."
+                    ) from exc
+                ollama_messages = [
+                    {
+                        **ollama_messages[0],
+                        "content": (
+                            ollama_messages[0]["content"]
+                            + "\n\n"
+                            + _STRUCTURED_RESPONSE_RETRY_INSTRUCTION
+                        ),
+                    },
+                    *ollama_messages[1:],
+                ]
 
     async def explain_product_matches(self, evidence: dict[str, object]) -> str:
         """Generate explanatory text only; backend evaluation and ranking remain authoritative."""

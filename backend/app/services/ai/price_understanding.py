@@ -5,9 +5,9 @@ from typing import Optional
 
 
 _NUMBER = r"(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?!\d|,\d)"
-_AMOUNT = rf"(?P<symbol>₹|Rs\.?|INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|[$€£¥])?\s*(?P<number>{_NUMBER})\s*(?P<scale>k|thousand|lakh|lakhs|lac|lacs|million|mn|crore|crores)?\s*(?P<code>INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|dollars?|euros?|pounds?)?"
+_AMOUNT = rf"(?P<symbol>₹|Rs\.?|INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|[$€£¥])?\s*(?P<number>{_NUMBER})\s*(?P<scale>k|thousand|lakh|lakhs|lac|lacs|million|mn|crore|crores)?\s*(?P<code>INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|rupees?|dollars?|euros?|pounds?)?"
 _AMOUNT_RE = re.compile(_AMOUNT, re.IGNORECASE)
-_AMOUNT_RAW = rf"(?:₹|Rs\.?|INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|[$€£¥])?\s*{_NUMBER}\s*(?:k|thousand|lakh|lakhs|lac|lacs|million|mn|crore|crores)?\s*(?:USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|dollars?|euros?|pounds?)?"
+_AMOUNT_RAW = rf"(?:₹|Rs\.?|INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|[$€£¥])?\s*{_NUMBER}\s*(?:k|thousand|lakh|lakhs|lac|lacs|million|mn|crore|crores)?\s*(?:INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|rupees?|dollars?|euros?|pounds?)?"
 _RANGE_RE = re.compile(
     rf"(?P<left>{_AMOUNT_RAW})\s*(?:to|through|and|[-–—])\s*(?P<right>{_AMOUNT_RAW})",
     re.IGNORECASE,
@@ -69,6 +69,8 @@ _CURRENCIES = {
     "rs": "INR",
     "rs.": "INR",
     "inr": "INR",
+    "rupee": "INR",
+    "rupees": "INR",
     "usd": "USD",
     "$": "USD",
     "dollar": "USD",

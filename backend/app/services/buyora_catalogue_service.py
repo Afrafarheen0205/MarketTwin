@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import ssl
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +21,10 @@ _RETRY_BACKOFF_SECONDS = 0.25
 
 class CatalogueUnavailable(Exception):
     """The configured external catalogue could not provide a valid response."""
+
+
+class CatalogueInvalidResponse(CatalogueUnavailable):
+    """The external catalogue returned a response that does not match its contract."""
 
 
 class CatalogueTimeout(CatalogueUnavailable):
@@ -149,6 +154,7 @@ class BuyoraCatalogueService:
         try:
             async with httpx.AsyncClient(
                 timeout=timeout,
+                verify=ssl.create_default_context(),
                 transport=self._transport,
                 follow_redirects=True,
             ) as client:
@@ -162,10 +168,16 @@ class BuyoraCatalogueService:
                 "The product catalogue request exceeded its time budget."
             ) from exc
         except httpx.TimeoutException as exc:
-            logger.warning("The Buyora catalogue request timed out.")
+            logger.warning(
+                "The Buyora catalogue request timed out (%s).",
+                type(exc).__name__,
+            )
             raise CatalogueTimeout("The product catalogue request timed out.") from exc
         except httpx.RequestError as exc:
-            logger.warning("The Buyora catalogue request failed.")
+            logger.warning(
+                "The Buyora catalogue request failed (%s).",
+                type(exc).__name__,
+            )
             raise CatalogueUnavailable("The product catalogue is unavailable.") from exc
 
         valid_products: list[CatalogueProduct] = []
@@ -177,6 +189,12 @@ class BuyoraCatalogueService:
                 valid_products.append(CatalogueProduct.model_validate(record))
             except ValidationError:
                 logger.warning("Skipping invalid catalogue product record at index %s.", index)
+
+        if products_payload and not valid_products:
+            logger.warning("The Buyora catalogue returned no valid product records.")
+            raise CatalogueInvalidResponse(
+                "The product catalogue returned invalid product records."
+            )
 
         unique_products: dict[str, CatalogueProduct] = {}
         for product in valid_products:
@@ -204,9 +222,9 @@ class BuyoraCatalogueService:
     ) -> tuple[list[Any], dict[str, Any]]:
         payload = await self._get_json(client, url, params=None)
         if not isinstance(payload, dict) or not isinstance(payload.get("products"), list):
-            raise CatalogueUnavailable("The product catalogue returned an invalid response.")
+            raise CatalogueInvalidResponse("The product catalogue returned an invalid response.")
         if payload.get("success") is False:
-            raise CatalogueUnavailable("The product catalogue could not return products.")
+            raise CatalogueInvalidResponse("The product catalogue could not return products.")
 
         records = list(payload["products"])
         if _diagnostics_enabled(self._settings):
@@ -222,9 +240,9 @@ class BuyoraCatalogueService:
                 if not isinstance(page_payload, dict) or not isinstance(
                     page_payload.get("products"), list
                 ):
-                    raise CatalogueUnavailable("The product catalogue returned an invalid page.")
+                    raise CatalogueInvalidResponse("The product catalogue returned an invalid page.")
                 if page_payload.get("success") is False:
-                    raise CatalogueUnavailable("The product catalogue could not return a page.")
+                    raise CatalogueInvalidResponse("The product catalogue could not return a page.")
                 if _diagnostics_enabled(self._settings):
                     logger.info(
                         "Buyora catalogue page %s returned %s records.",
@@ -282,28 +300,30 @@ class BuyoraCatalogueService:
                         async for chunk in response.aiter_bytes():
                             body.extend(chunk)
                             if len(body) > _MAX_RESPONSE_BYTES:
-                                raise CatalogueUnavailable(
+                                raise CatalogueInvalidResponse(
                                     "The product catalogue response was too large."
                                 )
                         try:
                             return json.loads(body)
                         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                            raise CatalogueUnavailable(
+                            raise CatalogueInvalidResponse(
                                 "The product catalogue returned invalid JSON."
                             ) from exc
-            except httpx.TimeoutException:
+            except httpx.TimeoutException as exc:
                 if attempt >= retries:
                     raise
                 logger.warning(
-                    "Buyora catalogue request timed out; retrying (%s/%s).",
+                    "Buyora catalogue request timed out (%s); retrying (%s/%s).",
+                    type(exc).__name__,
                     attempt + 1,
                     retries,
                 )
-            except httpx.RequestError:
+            except httpx.RequestError as exc:
                 if attempt >= retries:
                     raise
                 logger.warning(
-                    "Buyora catalogue request failed transiently; retrying (%s/%s).",
+                    "Buyora catalogue request failed transiently (%s); retrying (%s/%s).",
+                    type(exc).__name__,
                     attempt + 1,
                     retries,
                 )

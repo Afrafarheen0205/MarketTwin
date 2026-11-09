@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_current_user, require_roles
+from app.schemas.bidding import OfferSelectRequest
+from app.services.bidding_service import OfferConflict
 from app.services.offer_validation_service import (
     get_customer_demands,
     get_offers_for_customer,
@@ -23,9 +25,7 @@ async def customer_offers(current_user=Depends(require_roles("customer"))):
 
 @router.get("/customer/demands/{demand_id}/offers")
 async def customer_demand_offers(demand_id: str, current_user=Depends(require_roles("customer"))):
-    offers = get_offers_for_customer(current_user["id"])
-    filtered = [o for o in offers if True]
-    return {"items": filtered}
+    return {"items": get_offers_for_customer(current_user["id"], demand_id)}
 
 
 @router.get("/customer/demands/{demand_id}/offers/{offer_id}/eligibility")
@@ -42,19 +42,16 @@ async def customer_offer_eligibility(demand_id: str, offer_id: str, current_user
 
 
 @router.post("/customer/demands/{demand_id}/select-offer")
-async def customer_select_offer(demand_id: str, payload: Dict[str, Any], current_user=Depends(require_roles("customer"))):
-    offer_id = payload.get("offer_id")
-    terms_accepted = payload.get("terms_accepted", False)
-    if not offer_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="offer_id is required.")
+async def customer_select_offer(demand_id: str, payload: OfferSelectRequest, current_user=Depends(require_roles("customer"))):
     try:
-        selection = select_offer(current_user["id"], demand_id, offer_id, terms_accepted)
+        selection = select_offer(current_user["id"], demand_id, str(payload.offer_id), payload.terms_accepted, payload.expected_unit_price, payload.expected_quantity)
         return selection
+    except OfferConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"Selection failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Offer acceptance is unavailable. Refresh orders before retrying.")
 
 
 @router.get("/customer/offer-selections")

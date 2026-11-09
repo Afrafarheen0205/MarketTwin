@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.core.supabase import get_supabase_client
@@ -27,6 +28,7 @@ def extract_and_save(demand_id: str, demand: Dict[str, Any], version: str = "v1"
         "validation_errors": extracted.get("validation_errors", []),
         "confidence_score": extracted.get("confidence_score"),
         "status": extracted.get("status", "Pending"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     result = client.table("demand_normalized_requirements").upsert(
         payload,
@@ -50,9 +52,9 @@ def review_normalized(requirement_id: str, reviewer_id: str, updates: Dict[str, 
     if client is None:
         raise RuntimeError("Supabase is not configured.")
     updates["reviewed_by"] = reviewer_id
-    from datetime import datetime, timezone
     updates["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     updates["status"] = updates.get("status", "Manually Reviewed")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = client.table("demand_normalized_requirements").update(updates).eq("id", requirement_id).execute()
     if not result.data:
         raise RuntimeError("Review update failed.")

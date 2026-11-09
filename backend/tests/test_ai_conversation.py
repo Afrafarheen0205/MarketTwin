@@ -22,7 +22,11 @@ from app.services.ai.base import (
     AIProviderUnavailable,
 )
 from app.services.ai.conversation_service import ConversationService
-from app.services.ai.conversation_service import _extract_explicit_requirements
+from app.services.ai.conversation_service import (
+    _extract_explicit_requirements,
+    _merge_draft,
+    _remove_battery_capacity_split_fragments,
+)
 from app.services.ai.ollama_provider import OllamaProvider
 from app.api.v1.endpoints import ai as ai_endpoint
 
@@ -801,6 +805,50 @@ def test_capacity_short_answer_uses_previous_assistant_question():
     assert extracted.mandatory_requirements == {"capacity": "5000 litres"}
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "It should have a battery capacity of 4,500mAh or higher.",
+        "Mandatory requirements: battery capacity of 4,500mAh or higher.",
+    ],
+)
+def test_battery_capacity_thousands_separator_extracts_as_one_constraint(content):
+    extracted = _extract_explicit_requirements(
+        [ConversationMessage(role="user", content=content)]
+    )
+
+    assert extracted.mandatory_requirements == {
+        "battery_capacity": "at least 4500 mAh"
+    }
+
+
+def test_complete_battery_capacity_removes_only_split_provider_fragments():
+    extracted = _extract_explicit_requirements(
+        [
+            ConversationMessage(
+                role="user",
+                content="It should have a battery capacity of 4,500mAh or higher.",
+            )
+        ]
+    )
+    provider_draft = RequirementDraft(
+        mandatory_requirements={
+            "capacity": "battery of 4",
+            "or_higher": "500mah",
+            "500mah": "500mAh",
+            "camera": "required",
+        }
+    )
+
+    merged = _merge_draft(provider_draft, extracted, overwrite=True)
+    normalized = _remove_battery_capacity_split_fragments(merged)
+
+    assert normalized.mandatory_requirements == {
+        "battery_capacity": "at least 4500 mAh",
+        "camera": "required",
+    }
+
+
 def test_measurement_based_product_quantity_does_not_infer_countable_unit():
     from anyio import run
 
@@ -967,26 +1015,20 @@ def test_model_extraction_does_not_replace_existing_field_without_correction():
     }
 
 
-def test_invalid_model_response_uses_deterministic_extraction_fallback():
+def test_invalid_model_response_is_not_returned_as_a_successful_fallback():
     from anyio import run
 
     class InvalidProvider(AIProvider):
         async def converse(self, message, history, requirement_draft):
             raise AIProviderInvalidResponse("invalid provider output")
 
-    response = run(
-        ConversationService(InvalidProvider()).respond,
-        AIConversationRequest(
-            message="I need a laptop with 16GB RAM. I need one.",
-        ),
-    )
-
-    assert response.requirement_draft.product_name == "laptop"
-    assert response.requirement_draft.mandatory_requirements["ram"] == "16GB"
-    assert response.requirement_draft.commercial_constraints == {
-        "quantity": "1",
-        "unit": "units",
-    }
+    with pytest.raises(AIProviderInvalidResponse):
+        run(
+            ConversationService(InvalidProvider()).respond,
+            AIConversationRequest(
+                message="I need a laptop with 16GB RAM. I need one.",
+            ),
+        )
 
 
 def test_model_empty_fields_do_not_clear_existing_values():
@@ -1200,6 +1242,7 @@ async def test_ollama_provider_sends_configured_model_and_validates_json():
     assert result.requirement_draft.mandatory_requirements["material"] == "SS 304"
     assert calls[0]["model"] == "qwen3-test"
     assert calls[0]["stream"] is False
+    assert calls[0]["think"] is False
     assert calls[0]["messages"][-1] == {"role": "user", "content": "I need ten tanks."}
     assert calls[0]["messages"][1] == {
         "role": "user",
@@ -1216,7 +1259,11 @@ async def test_ollama_provider_sends_configured_model_and_validates_json():
 
 @pytest.mark.anyio
 async def test_ollama_invalid_json_raises_controlled_provider_error():
+    calls = 0
+
     async def handle_request(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         return httpx.Response(200, json={"message": {"content": "not json"}})
 
     provider = OllamaProvider(
@@ -1226,6 +1273,244 @@ async def test_ollama_invalid_json_raises_controlled_provider_error():
 
     with pytest.raises(AIProviderInvalidResponse):
         await provider.converse("Need a tank", [], RequirementDraft())
+    assert calls == 2
+
+
+@pytest.mark.anyio
+async def test_ollama_retries_semantic_validation_and_preserves_history_and_draft(caplog):
+    calls = []
+    responses = [
+        {
+            "assistant_message": "I have captured the details.",
+            "requirement_draft": {
+                "commercial_constraints": {"max_target_unit_price": "two thousand"},
+            },
+        },
+        _draft_response().model_dump(),
+    ]
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append(payload)
+        return httpx.Response(
+            200,
+            json={"message": {"content": json.dumps(responses.pop(0))}},
+        )
+
+    history = [
+        ConversationMessage(role="user", content="I need wireless headphones."),
+        ConversationMessage(role="assistant", content="How many units do you need?"),
+    ]
+    existing_draft = RequirementDraft(
+        product_name="wireless headphones",
+        commercial_constraints={"quantity": "2", "unit": "units"},
+    )
+    provider = OllamaProvider(
+        Settings(_env_file=None, OLLAMA_MODEL="qwen3.5:4b"),
+        transport=httpx.MockTransport(handle_request),
+    )
+
+    result = await provider.converse("Two units.", history, existing_draft)
+
+    assert result.assistant_message == "I have captured the product requirements."
+    assert len(calls) == 2
+    assert "max_target_unit_price must be a positive numeric string" in caplog.text
+    for payload in calls:
+        assert payload["model"] == "qwen3.5:4b"
+        assert payload["messages"][1:3] == [message.model_dump() for message in history]
+        assert payload["messages"][-1] == {"role": "user", "content": "Two units."}
+        assert "wireless headphones" in payload["messages"][0]["content"]
+    assert "did not pass structured response validation" in calls[1]["messages"][0]["content"]
+
+
+@pytest.mark.anyio
+async def test_ollama_accepts_a_previously_working_normal_prompt():
+    calls = 0
+    structured = {
+        "assistant_message": "What capacity do you need for the tank?",
+        "requirement_draft": {
+            "product_name": "water tank",
+            "product_type": "water tank",
+            "mandatory_requirements": {"capacity": "1000 litres"},
+        },
+    }
+
+    async def handle_request(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"message": {"content": json.dumps(structured)}},
+        )
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+
+    result = await provider.converse(
+        "I need a water tank with a capacity of 1000 litres.",
+        [],
+        RequirementDraft(),
+    )
+
+    assert calls == 1
+    assert result.requirement_draft.mandatory_requirements == {
+        "capacity": "1000 litres"
+    }
+    assert AIProviderResponse.model_validate(result.model_dump()) == result
+
+
+@pytest.mark.anyio
+async def test_ollama_repairs_headphone_classification_conflict_and_empty_preference():
+    calls = []
+    responses = [
+        {
+            "assistant_message": "I noted your headphone requirements.",
+            "requirement_draft": {
+                "product_name": "wireless headphones",
+                "mandatory_requirements": {
+                    "noise_cancellation": "Active noise cancellation"
+                },
+                "optional_preferences": {
+                    "noise_cancellation": "Noise cancellation",
+                    "colour": "   ",
+                },
+                "commercial_constraints": {
+                    "max_target_unit_price": "2000",
+                    "currency": "INR",
+                },
+            },
+        },
+        {
+            "assistant_message": "How many units do you need?",
+            "requirement_draft": {
+                "product_name": "wireless headphones",
+                "mandatory_requirements": {
+                    "noise_cancellation": "Active noise cancellation"
+                },
+                "optional_preferences": {"colour": "Black"},
+                "commercial_constraints": {
+                    "max_target_unit_price": "2000",
+                    "currency": "INR",
+                },
+            },
+        },
+    ]
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"message": {"content": json.dumps(responses.pop(0))}},
+        )
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+
+    result = await provider.converse(
+        "I need wireless headphones with active noise cancellation, and I prefer black under 2000 INR.",
+        [],
+        RequirementDraft(),
+    )
+
+    assert len(calls) == 2
+    assert result.requirement_draft.product_name == "wireless headphones"
+    assert result.requirement_draft.mandatory_requirements == {
+        "noise_cancellation": "Active noise cancellation"
+    }
+    assert result.requirement_draft.optional_preferences == {"colour": "Black"}
+    assert result.requirement_draft.commercial_constraints == {
+        "max_target_unit_price": "2000",
+        "currency": "INR",
+    }
+    assert "same key in both mandatory_requirements and optional_preferences" in (
+        calls[1]["messages"][0]["content"]
+    )
+    assert AIProviderResponse.model_validate(result.model_dump()) == result
+
+
+@pytest.mark.anyio
+async def test_ollama_omits_empty_preference_without_retry():
+    calls = 0
+    structured = {
+        "assistant_message": "I noted that requirement.",
+        "requirement_draft": {
+            "mandatory_requirements": {"noise_cancellation": "Required"},
+            "optional_preferences": {"colour": "  "},
+        },
+    }
+
+    async def handle_request(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"message": {"content": json.dumps(structured)}},
+        )
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+
+    result = await provider.converse("I need noise cancellation.", [], RequirementDraft())
+
+    assert calls == 1
+    assert result.requirement_draft.mandatory_requirements == {
+        "noise_cancellation": "Required"
+    }
+    assert result.requirement_draft.optional_preferences == {}
+
+
+@pytest.mark.anyio
+async def test_ollama_normalizes_braced_numeric_amount_from_structured_output():
+    calls = 0
+
+    async def handle_request(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "assistant_message": "I captured your budget.",
+                            "requirement_draft": {
+                                "commercial_constraints": {
+                                    "max_target_unit_price": "{2000}",
+                                },
+                            },
+                        }
+                    ),
+                },
+            },
+        )
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+    result = await provider.converse("Under 2000 INR.", [], RequirementDraft())
+
+    assert calls == 1
+    assert result.requirement_draft.commercial_constraints["max_target_unit_price"] == "2000"
+
+
+def test_ai_provider_response_rejects_placeholder_text_and_malformed_prices():
+    for assistant_message, price in (("null", "2000"), ("Captured.", "{2000}")):
+        with pytest.raises(ValueError):
+            AIProviderResponse.model_validate(
+                {
+                    "assistant_message": assistant_message,
+                    "requirement_draft": {
+                        "commercial_constraints": {"max_target_unit_price": price},
+                    },
+                }
+            )
 
 
 @pytest.mark.anyio
@@ -1319,6 +1604,90 @@ def test_conversation_endpoint_maps_provider_failures(monkeypatch):
     assert response.status_code == 504
     assert response.json()["error"] == "The AI provider took too long to respond. Please try again."
     assert "private timeout detail" not in response.text
+
+
+def test_conversation_endpoint_maps_ollama_body_timeout_after_http_200(monkeypatch):
+    class TimedOutResponseBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            if False:
+                yield b""
+            raise httpx.ReadTimeout("private timeout detail")
+
+        async def aclose(self):
+            return None
+
+    async def handle_request(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=TimedOutResponseBody())
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+    monkeypatch.setattr(ai_endpoint, "create_ai_provider", lambda: provider)
+    response = TestClient(app).post(
+        "/api/v1/ai/conversation",
+        json={"message": "I need wireless headphones."},
+    )
+
+    assert response.status_code == 504
+    assert response.json()["error"] == "The AI provider took too long to respond. Please try again."
+    assert "private timeout detail" not in response.text
+
+
+def test_conversation_endpoint_maps_invalid_provider_response_safely(monkeypatch):
+    class InvalidProvider(AIProvider):
+        async def converse(self, message, history, requirement_draft):
+            raise AIProviderInvalidResponse("private validation detail")
+
+    monkeypatch.setattr(ai_endpoint, "create_ai_provider", InvalidProvider)
+    response = TestClient(app).post(
+        "/api/v1/ai/conversation",
+        json={"message": "Need a water tank."},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "The AI provider returned an invalid response. Please try again."
+    assert "private validation detail" not in response.text
+
+
+def test_conversation_endpoint_returns_safe_502_after_classification_retry_fails(monkeypatch):
+    calls = 0
+    invalid_response = {
+        "assistant_message": "I noted the headphone requirements.",
+        "requirement_draft": {
+            "product_name": "wireless headphones",
+            "mandatory_requirements": {"noise_cancellation": "Active"},
+            "optional_preferences": {"noise_cancellation": "Preferred"},
+        },
+    }
+
+    async def handle_request(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"message": {"content": json.dumps(invalid_response)}},
+        )
+
+    provider = OllamaProvider(
+        Settings(_env_file=None),
+        transport=httpx.MockTransport(handle_request),
+    )
+    monkeypatch.setattr(ai_endpoint, "create_ai_provider", lambda: provider)
+    response = TestClient(app).post(
+        "/api/v1/ai/conversation",
+        json={
+            "message": (
+                "I need wireless headphones with active noise cancellation, and I prefer "
+                "black under 2000 INR."
+            )
+        },
+    )
+
+    assert calls == 2
+    assert response.status_code == 502
+    assert response.json()["error"] == "The AI provider returned an invalid response. Please try again."
+    assert "noise_cancellation" not in response.text
 
 
 def test_anonymous_conversation_does_not_access_supabase(monkeypatch):

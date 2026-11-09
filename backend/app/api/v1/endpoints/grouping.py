@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import get_current_user, require_roles
-from app.services.demand_grouping_engine import generate_groups
+from app.services.demand_group_merge_service import resolve_group_id, resolve_group_ids
 from app.core.supabase import get_supabase_client
 
 logger = logging.getLogger("markettwin.api.grouping")
@@ -13,12 +13,10 @@ router = APIRouter()
 
 @router.post("/admin/demand-groups/generate")
 async def generate_demand_groups(current_user=Depends(require_roles("admin"))):
-    try:
-        result = generate_groups(triggered_by=current_user["id"])
-        return result
-    except Exception as exc:
-        logger.error(f"Grouping failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Legacy demand-group generation is disabled; use the reviewed submission workflow.",
+    )
 
 
 @router.get("/admin/demand-groups")
@@ -45,6 +43,7 @@ async def get_demand_group(group_id: str, current_user=Depends(require_roles("ad
     client = get_supabase_client()
     if client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured.")
+    group_id = resolve_group_id(group_id, client=client)
     group = client.table("demand_groups").select("*").eq("id", group_id).single().execute()
     if not group.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
@@ -57,6 +56,7 @@ async def review_demand_group(group_id: str, payload: Dict[str, Any], current_us
     client = get_supabase_client()
     if client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured.")
+    group_id = resolve_group_id(group_id, client=client)
     action = payload.get("action")
     notes = payload.get("notes")
     group = client.table("demand_groups").select("*").eq("id", group_id).single().execute()
@@ -90,11 +90,18 @@ async def customer_groups(current_user=Depends(require_roles("customer"))):
     demand_ids = [d["id"] for d in (demands.data or [])]
     if not demand_ids:
         return {"items": []}
-    members = client.table("demand_group_members").select("group_id").in_("demand_id", demand_ids).execute()
-    group_ids = list({m["group_id"] for m in (members.data or [])})
+    members = (
+        client.table("demand_group_members")
+        .select("group_id")
+        .eq("membership_status", "active")
+        .in_("demand_id", demand_ids)
+        .execute()
+    )
+    group_ids = sorted({m["group_id"] for m in (members.data or [])})
     if not group_ids:
         return {"items": []}
-    groups = client.table("demand_groups").select("*").in_("id", group_ids).execute()
+    canonical_ids = sorted(set(resolve_group_ids(group_ids, client=client).values()))
+    groups = client.table("demand_groups").select("*").in_("id", canonical_ids).execute()
     return {"items": groups.data or []}
 
 
@@ -103,13 +110,21 @@ async def customer_group_detail(group_id: str, current_user=Depends(require_role
     client = get_supabase_client()
     if client is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase is not configured.")
+    group_id = resolve_group_id(group_id, client=client)
     group = client.table("demand_groups").select("*").eq("id", group_id).single().execute()
     if not group.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
     # verify membership
     demands = client.table("demands").select("id").eq("customer_id", current_user["id"]).execute()
     demand_ids = [d["id"] for d in (demands.data or [])]
-    members = client.table("demand_group_members").select("*").eq("group_id", group_id).in_("demand_id", demand_ids).execute()
+    members = (
+        client.table("demand_group_members")
+        .select("*")
+        .eq("group_id", group_id)
+        .eq("membership_status", "active")
+        .in_("demand_id", demand_ids)
+        .execute()
+    )
     if not members.data:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
     return {"group": group.data, "membership": members.data}

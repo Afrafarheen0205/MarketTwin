@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Result,
   Row,
   Select,
   Space,
@@ -28,7 +27,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import demandApi, { DemandRecord, DemandSpecification } from '../../api/demandApi';
+import demandApi, { DemandSpecification } from '../../api/demandApi';
 import {
   clearReviewedDemandDraft,
   loadReviewedDemandDraft,
@@ -238,8 +237,6 @@ export const CreateDemand: React.FC = () => {
 
   const [currentStep, setCurrentStep] = useState(0);
   const [form] = Form.useForm();
-  const [submitted, setSubmitted] = useState(false);
-  const [createdDemand, setCreatedDemand] = useState<DemandRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const submissionLock = useRef(false);
@@ -311,17 +308,28 @@ export const CreateDemand: React.FC = () => {
       }
       if (submissionLock.current) return;
 
-      const values = form.getFieldsValue();
+      const values = form.getFieldsValue(true);
       const selectedCategory = Array.isArray(values.category)
         ? values.category[0]
         : values.category;
       if (
-        !values.targetQuantity ||
+        values.targetQuantity === undefined ||
+        values.targetQuantity === null ||
         !values.title?.trim() ||
         !selectedCategory?.trim() ||
         !values.unit?.trim() ||
-        !values.currency?.trim()
+        !values.currency?.trim() ||
+        values.minimumTargetPrice === undefined ||
+        values.minimumTargetPrice === null ||
+        values.maximumTargetPrice === undefined ||
+        values.maximumTargetPrice === null
       ) {
+        setSubmissionError(
+          'Complete the product, category, quantity, unit, price range, and currency before submitting.'
+        );
+        setCurrentStep(
+          !values.title?.trim() || !selectedCategory?.trim() ? 0 : 1
+        );
         return;
       }
       submissionLock.current = true;
@@ -375,9 +383,7 @@ export const CreateDemand: React.FC = () => {
           minimum_target_unit_price: values.minimumTargetPrice,
           maximum_target_unit_price: values.maximumTargetPrice,
           currency: values.currency.trim().toUpperCase(),
-          expected_lead_time: isAIDraftFlow
-            ? values.waitingPeriodDays
-            : undefined,
+          expected_lead_time: values.waitingPeriodDays,
           required_delivery_date: values.deadline
             ? values.deadline.format('YYYY-MM-DD')
             : null,
@@ -395,8 +401,6 @@ export const CreateDemand: React.FC = () => {
           mandatory_requirements: mandatoryRequirements,
           optional_preferences: optionalPreferences,
         }, submissionId.current);
-        setCreatedDemand(data);
-        setSubmitted(true);
         clearReviewedDemandDraft();
         try {
           sessionStorage.removeItem(SUBMISSION_ID_KEY);
@@ -404,11 +408,24 @@ export const CreateDemand: React.FC = () => {
           // The database idempotency key remains safe to reuse if storage cleanup fails.
         }
         submissionId.current = null;
+        navigate('/customer/demands', {
+          replace: true,
+          state: { submittedDemandId: data.id },
+        });
       } catch (requestError) {
-        setSubmissionError(
+        const status =
+          typeof requestError === 'object' && requestError !== null && 'status' in requestError
+            ? Number(requestError.status)
+            : undefined;
+        const message =
           requestError instanceof Error
             ? requestError.message
-            : 'Demand submission failed. Please try again.'
+            : 'Demand submission failed. Please try again.';
+        console.error('[Demand submission failed]', { status, message });
+        setSubmissionError(
+          status === 401 || status === 403
+            ? 'Your customer session has expired or is no longer authorized. Sign in again; your form entries are preserved.'
+            : message
         );
       } finally {
         submissionLock.current = false;
@@ -453,68 +470,6 @@ export const CreateDemand: React.FC = () => {
           </Button>
         }
       />
-    );
-  }
-
-  if (submitted && createdDemand) {
-    return (
-      <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0', padding: '30px 20px' }}>
-        <Result
-          status="success"
-          title="Demand Created Successfully!"
-          extra={[
-            <Button type="primary" key="demands" onClick={() => navigate('/customer/demands')}>
-              View My Demands
-            </Button>,
-            <Button
-              key="analyze"
-              onClick={() =>
-                navigate(
-                  `/customer/demands/${encodeURIComponent(createdDemand.id)}/analysis`
-                )
-              }
-            >
-              Analyze Existing Demands
-            </Button>,
-          ]}
-        >
-          <div style={{ maxWidth: 600, margin: '0 auto', background: '#F5F7FA', padding: 20, borderRadius: 8, textAlign: 'left' }}>
-            <Title level={5} style={{ margin: 0 }}>Demand Summary</Title>
-            <Divider style={{ margin: '12px 0' }} />
-            <p>Product: <strong>{createdDemand.product_name}</strong></p>
-            <p>Category: {createdDemand.category || 'Not specified'}</p>
-            <p>Quantity: {createdDemand.quantity} {createdDemand.unit}</p>
-            <p>
-              Target unit price: {createdDemand.minimum_target_unit_price ?? 'Not specified'}–{createdDemand.maximum_target_unit_price ?? 'Not specified'} {createdDemand.currency}
-            </p>
-            <p>Submitted: {createdDemand.created_at ? new Date(createdDemand.created_at).toLocaleString() : 'Not provided'}</p>
-            <p>Status: {createdDemand.status || 'Not provided'}</p>
-            {createdDemand.demand_code && (
-              <p>Demand reference: {createdDemand.demand_code}</p>
-            )}
-            {createdDemand.technical_specifications?.some((spec) => spec.mandatory) && (
-              <>
-                <strong>Mandatory specifications</strong>
-                <ul>
-                  {createdDemand.technical_specifications
-                    .filter((spec) => spec.mandatory)
-                    .map((spec) => <li key={`${spec.name}-${spec.value}`}>{spec.name}: {spec.value}</li>)}
-                </ul>
-              </>
-            )}
-            {createdDemand.technical_specifications?.some((spec) => !spec.mandatory) && (
-              <>
-                <strong>Optional specifications</strong>
-                <ul>
-                  {createdDemand.technical_specifications
-                    .filter((spec) => !spec.mandatory)
-                    .map((spec) => <li key={`${spec.name}-${spec.value}`}>{spec.name}: {spec.value}</li>)}
-                </ul>
-              </>
-            )}
-          </div>
-        </Result>
-      </Card>
     );
   }
 
@@ -727,33 +682,8 @@ export const CreateDemand: React.FC = () => {
             </div>
           )}
           {currentStep === 1 && (
-            isAIDraftFlow ? (
-              <Form.Item
-                name="waitingPeriodDays"
-                label="How many days are you willing to wait?"
-                rules={[
-                  { required: true, message: 'Please enter how many days you are willing to wait' },
-                  { type: 'number', min: 1, max: 3650, message: 'Enter a waiting period from 1 to 3650 days' },
-                  {
-                    validator: async (_, value: number | undefined) => {
-                      if (value === undefined || Number.isInteger(value)) return;
-                      throw new Error('Waiting period must be a whole number of days');
-                    },
-                  },
-                ]}
-              >
-                <InputNumber
-                  min={1}
-                  max={3650}
-                  precision={0}
-                  addonAfter="days"
-                  placeholder="e.g. 30"
-                  style={{ width: '100%', maxWidth: 360 }}
-                />
-              </Form.Item>
-            ) : (
-              <div>
-                <Row gutter={16}>
+            <div>
+              <Row gutter={16}>
                   <Col xs={24} sm={8}>
                     <Form.Item name="targetQuantity" label="Purchase quantity" rules={[{ required: true, message: 'Quantity is required' }]}>
                       <InputNumber min={0.000001} max={1000000000} style={{ width: '100%' }} />
@@ -810,9 +740,31 @@ export const CreateDemand: React.FC = () => {
                       <Input placeholder="e.g. INR" maxLength={3} />
                     </Form.Item>
                   </Col>
-                </Row>
-              </div>
-            )
+              </Row>
+              <Form.Item
+                name="waitingPeriodDays"
+                label="How many days are you willing to wait?"
+                rules={isAIDraftFlow ? [
+                  { required: true, message: 'Please enter how many days you are willing to wait' },
+                  { type: 'number', min: 1, max: 3650, message: 'Enter a waiting period from 1 to 3650 days' },
+                  {
+                    validator: async (_, value: number | undefined) => {
+                      if (value === undefined || Number.isInteger(value)) return;
+                      throw new Error('Waiting period must be a whole number of days');
+                    },
+                  },
+                ] : undefined}
+              >
+                <InputNumber
+                  min={1}
+                  max={3650}
+                  precision={0}
+                  addonAfter="days"
+                  placeholder="e.g. 30"
+                  style={{ width: '100%', maxWidth: 360 }}
+                />
+              </Form.Item>
+            </div>
           )}
           {currentStep === 2 && (
             <div>
@@ -891,18 +843,13 @@ export const CreateDemand: React.FC = () => {
               loading={loading}
               disabled={
                 loading ||
-                (isAIDraftFlow && (!reviewedDraft || currentStep === 2))
+                (isAIDraftFlow && !reviewedDraft)
               }
               icon={currentStep === 2 ? <CheckCircleOutlined /> : <ArrowRightOutlined />}
             >
               {currentStep === 2 ? 'Submit Demand' : 'Next Step'}
             </Button>
           </div>
-          {isAIDraftFlow && currentStep === 2 && (
-            <Paragraph type="secondary" style={{ marginTop: 12 }}>
-              Submission is intentionally disabled until the deployed persistence schema is verified.
-            </Paragraph>
-          )}
         </Form>
       </Card>
     </div>

@@ -5,11 +5,10 @@ from typing import Optional, Sequence
 from app.schemas.ai import (
     AIConversationRequest,
     AIConversationResponse,
-    AIProviderResponse,
     ConversationMessage,
     RequirementDraft,
 )
-from app.services.ai.base import AIProvider, AIProviderInvalidResponse
+from app.services.ai.base import AIProvider
 from app.services.ai.price_understanding import (
     SUPPORTED_CURRENCY_CODES,
     understand_price,
@@ -51,6 +50,13 @@ _CAPACITY_PATTERN = re.compile(
     r"(litres?|liters?|gallons?|ml|millilitres?|milliliters?|"
     r"m3|cubic\s+met(?:er|re)s?)"
     r"(?:\s+of\s+(?:storage\s+)?capacity|\s+capacity)?\b",
+    re.IGNORECASE,
+)
+_BATTERY_CAPACITY_PATTERN = re.compile(
+    r"\b(?:battery\s+)?capacity\b\s*(?:(?:of|is|:|should\s+be)\s*)?"
+    r"(?:(?:at\s+least|minimum(?:\s+of)?|min\.?\s*)\s*)?"
+    r"(?P<amount>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*mAh\b"
+    r"(?:\s*(?:or\s+higher|or\s+more|or\s+above|and\s+above))?",
     re.IGNORECASE,
 )
 _NUMBER_WORD_PATTERN = (
@@ -378,7 +384,7 @@ def _merge_application_values(existing: str, new_value: str) -> str:
 
 
 def _split_specification_items(value: str, *, split_or: bool = False) -> list[str]:
-    delimiter = r"\s*,\s*(?:and\s+)?|\s+\band\b\s+"
+    delimiter = r"(?<!\d),(?!\s*\d{3}(?:\D|$))\s*(?:and\s+)?|\s+\band\b\s+"
     if split_or:
         delimiter += r"|\s+\bor\b\s+"
     items = re.split(delimiter, value, flags=re.I)
@@ -399,6 +405,10 @@ def _specification_key_value(item: str) -> tuple[str, str]:
     folded = normalized.casefold()
     if folded in {"and", "or", "with", "including", "featuring", "equipped with"}:
         return "", ""
+    battery_capacity = _BATTERY_CAPACITY_PATTERN.search(normalized)
+    if battery_capacity:
+        amount = battery_capacity.group("amount").replace(",", "")
+        return "battery_capacity", f"at least {amount} mAh"
     if re.search(r"\b(?:without|must\s+not|should\s+not|free\s+from|no\s+)\b", folded):
         return "exclusions", normalized
     for suffix, key in _SPECIFICATION_SUFFIXES:
@@ -1488,6 +1498,30 @@ def _merge_draft(
     return RequirementDraft.model_validate(merged)
 
 
+def _remove_battery_capacity_split_fragments(draft: RequirementDraft) -> RequirementDraft:
+    values = draft.model_dump()
+    for field in ("mandatory_requirements", "optional_preferences"):
+        requirements = values[field]
+        if not requirements.get("battery_capacity"):
+            continue
+        for key, value in list(requirements.items()):
+            normalized_key = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+            normalized_value = value.casefold().strip()
+            partial_capacity = normalized_key == "capacity" and re.fullmatch(
+                r"battery\s+of\s+(?:at\s+least\s+)?\d+(?:\.\d+)?",
+                normalized_value,
+            )
+            split_qualifier = normalized_key.endswith("or_higher") and re.fullmatch(
+                r"\d+(?:,\d{3})*\s*mAh", value, re.IGNORECASE
+            )
+            split_unit_key = re.fullmatch(r"\d+(?:,\d{3})*mAh", key, re.IGNORECASE) and re.fullmatch(
+                r"\d+(?:,\d{3})*\s*mAh", value, re.IGNORECASE
+            )
+            if partial_capacity or split_qualifier or split_unit_key:
+                del requirements[key]
+    return RequirementDraft.model_validate(values)
+
+
 def _normalize_recommendation_preferences(draft: RequirementDraft) -> RequirementDraft:
     values = draft.model_dump()
     delivery = values["delivery_constraints"]
@@ -1514,17 +1548,11 @@ class ConversationService:
 
     async def respond(self, request: AIConversationRequest) -> AIConversationResponse:
         draft = request.requirement_draft or RequirementDraft()
-        try:
-            generated = await self._provider.converse(
-                request.message,
-                request.conversation_history,
-                draft,
-            )
-        except AIProviderInvalidResponse:
-            generated = AIProviderResponse(
-                assistant_message="I have noted the details you provided.",
-                requirement_draft=RequirementDraft(),
-            )
+        generated = await self._provider.converse(
+            request.message,
+            request.conversation_history,
+            draft,
+        )
         current_message = ConversationMessage(role="user", content=request.message)
         historical_extraction = _extract_explicit_requirements(request.conversation_history)
         previous_assistant = next(
@@ -1561,6 +1589,7 @@ class ConversationService:
             merge_applications=not correction_requested,
             merge_distinct_values=not correction_requested,
         )
+        merged_draft = _remove_battery_capacity_split_fragments(merged_draft)
         merged_values = merged_draft.model_dump()
         merged_commercial = merged_values["commercial_constraints"]
         if any(

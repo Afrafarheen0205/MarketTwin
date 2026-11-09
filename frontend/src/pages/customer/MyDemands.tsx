@@ -157,6 +157,21 @@ export const MyDemands: React.FC = () => {
       render: (_, record) => `${record.quantity} ${record.unit || ''}`.trim(),
     },
     {
+      title: 'Product family',
+      key: 'product_family',
+      render: (_, record) =>
+        record.group_id ? (
+          <div>
+            <div>{record.group_reference || 'Grouped'}</div>
+            <Text type="secondary">
+              {record.participating_demand_count ?? 0} demands · {record.participants_count ?? 0} customers
+            </Text>
+          </div>
+        ) : (
+          <Text type="secondary">Not grouped</Text>
+        ),
+    },
+    {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
