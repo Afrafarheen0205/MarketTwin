@@ -284,7 +284,7 @@ const DemandAnalysis: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message="Demand analysis could not be loaded."
+          title="Demand analysis could not be loaded."
           description={error}
           action={
             <Button icon={<ReloadOutlined />} onClick={() => void loadAnalysis()}>
@@ -345,7 +345,7 @@ const DemandAnalysis: React.FC = () => {
             style={{ marginBottom: 16 }}
             type="error"
             showIcon
-            message={editError}
+            title={editError}
           />
         )}
         {reviewingEdits && pendingEdit ? (
@@ -679,7 +679,7 @@ const DemandAnalysis: React.FC = () => {
                   <Alert
                     style={{ marginTop: 12 }}
                     type={result.classification === 'incompatible' ? 'warning' : 'info'}
-                    message="Differences"
+                    title="Differences"
                     description={result.differences.join(' ')}
                   />
                 )}

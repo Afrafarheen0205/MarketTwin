@@ -32,7 +32,7 @@ const ForgotPasswordPage: React.FC = () => {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F5F7FA', padding: 24 }}>
       <Card style={{ width: 420 }}>
         <Title level={3} style={{ color: '#172B4D' }}>Forgot password</Title>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
         {sent ? (
           <Text>Check your email for a reset link.</Text>
         ) : (

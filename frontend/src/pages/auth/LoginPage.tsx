@@ -121,7 +121,7 @@ const LoginPage: React.FC = () => {
           <Title level={3} style={{ margin: 0, color: '#172B4D' }}>Sign in to MarketTwin</Title>
           <Text type="secondary">Choose your role and use your Supabase account.</Text>
         </Space>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>
             <Input prefix={<MailOutlined />} />

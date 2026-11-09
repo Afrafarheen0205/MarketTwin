@@ -241,7 +241,7 @@ export const MyDemands: React.FC = () => {
           </Col>
         </Row>
       </Card>
-      {loadError && <Alert type="error" showIcon message={loadError} />}
+      {loadError && <Alert type="error" showIcon title={loadError} />}
       <Card styles={{ body: { padding: 16 } }}>
         <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12}>

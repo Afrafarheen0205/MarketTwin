@@ -50,7 +50,8 @@ async def customer_select_offer(demand_id: str, payload: OfferSelectRequest, cur
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except Exception:
+    except Exception as exc:
+        logger.error("Offer acceptance failed for demand %s: %s", demand_id, exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Offer acceptance is unavailable. Refresh orders before retrying.")
 
 

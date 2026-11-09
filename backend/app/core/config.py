@@ -57,7 +57,10 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = Field(default="", description="Groq API key for AI features")
     AI_PROVIDER: str = Field(default="ollama", description="AI provider used for requirement conversations")
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama API base URL")
-    OLLAMA_MODEL: str = Field(default="qwen3.5:4b", description="Ollama model used for AI features")
+    OLLAMA_MODEL: str = Field(
+        default="qwen3.5:4b",
+        description="Ollama model used for AI features",
+    )
     OLLAMA_EMBEDDING_BASE_URL: str = Field(
         default="http://localhost:11434",
         description="Ollama API base URL used for demand embeddings",

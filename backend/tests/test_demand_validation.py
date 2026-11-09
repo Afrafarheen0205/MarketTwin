@@ -140,6 +140,11 @@ def test_create_route_does_not_attempt_unverified_database_write(monkeypatch):
     def unexpected_write(*_args, **_kwargs):
         pytest.fail("database write must remain blocked until schema verification")
 
+    monkeypatch.setattr(
+        demands,
+        "get_settings",
+        lambda: type("Settings", (), {"DEMAND_PERSISTENCE_ENABLED": False})(),
+    )
     monkeypatch.setattr(demands, "create_demand", unexpected_write)
     payload = DemandCreateRequest.model_validate(valid_payload())
 

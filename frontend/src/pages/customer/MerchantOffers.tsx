@@ -60,13 +60,13 @@ export const MerchantOffers: React.FC = () => {
           <Col xs={24} md={8} style={{ textAlign: 'right' }}><Button type="primary" icon={<DiffOutlined />} size="large" onClick={() => navigate('/customer/compare')}>Open Offer Comparison Matrix</Button></Col>
         </Row>
       </Card>
-      <Alert message="Buyer Protection & Explicit Approval Gating" description="Merchants submit bids to your demand pools. You are under no obligation to buy until you explicitly review and approve a proposal." type="success" showIcon icon={<SafetyCertificateOutlined style={{ color: '#52C41A' }} />} style={{ background: '#F6FFED', borderColor: '#B7EB8F' }} />
+      <Alert title="Buyer Protection & Explicit Approval Gating" description="Merchants submit bids to your demand pools. You are under no obligation to buy until you explicitly review and approve a proposal." type="success" showIcon icon={<SafetyCertificateOutlined style={{ color: '#52C41A' }} />} style={{ background: '#F6FFED', borderColor: '#B7EB8F' }} />
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 0 } }}>
         <Table columns={columns} dataSource={offers} rowKey={offer => `${offer.customer_demand_id}:${offer.id}`} pagination={{ pageSize: 6 }} loading={loading} scroll={{ x: 1000 }} />
       </Card>
       <Modal title="Confirm Offer Acceptance" open={Boolean(approvingOffer)} onCancel={() => { if (!saving) { setApprovingOffer(null); setExplicitConsent(false); } }} onOk={handleApprove} confirmLoading={saving} okText="Confirm & Place Order" okButtonProps={{ disabled: !explicitConsent, type: 'primary' }} width={650}>
         {approvingOffer && (<div style={{ padding: '12px 0' }}>
-          <Alert message="Explicit Approval Requirement" description="Per MarketTwin requirements, you must explicitly approve the merchant's final terms before an order is placed." type="info" style={{ marginBottom: 16, background: '#F0F7FF', borderColor: '#BAE0FF' }} />
+          <Alert title="Explicit Approval Requirement" description="Per MarketTwin requirements, you must explicitly approve the merchant's final terms before an order is placed." type="info" style={{ marginBottom: 16, background: '#F0F7FF', borderColor: '#BAE0FF' }} />
           <Descriptions bordered size="small" column={2} style={{ marginBottom: 16 }}>
             <Descriptions.Item label="Offer Code" span={2}><Text strong style={{ color: '#1677FF' }}>{approvingOffer.offer_code}</Text></Descriptions.Item>
             <Descriptions.Item label="Merchant"><strong>{approvingOffer.merchant_name}</strong> ({approvingOffer.merchant_rating} / 5.0)</Descriptions.Item>

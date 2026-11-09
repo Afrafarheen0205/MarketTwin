@@ -1,3 +1,4 @@
+import axiosClient from '../api/axiosClient';
 import { supabase } from './supabase';
 
 export interface CreateOrderPayload {
@@ -337,14 +338,18 @@ export const updateOrderStatus = async (
     updateData.payment_status = 'Released';
   }
 
-  const { data, error } = await supabase
-    .from('orders')
-    .update(updateData)
-    .eq('id', orderId)
-    .select()
-    .single();
-
-  if (error) throw error;
+  // Use the trusted FastAPI backend so offer-based orders (which are guarded
+  // by the guard_offer_order_write_v1 trigger) can be updated securely.
+  const { data } = await axiosClient.patch(`/api/v1/merchant/orders/${orderId}/fulfillment`, {
+    status: newStatus,
+    carrier: extra?.carrier,
+    tracking_number: extra?.tracking_number,
+    estimated_delivery: extra?.estimated_delivery,
+    remarks: extra?.remarks,
+    merchant_id: extra?.merchant_id,
+    merchant_name: extra?.merchant_name,
+  });
+  if (!data) throw new Error('Fulfillment update did not return an order.');
 
   // Insert tracking event in order_status_history
   try {

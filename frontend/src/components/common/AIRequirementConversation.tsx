@@ -332,13 +332,13 @@ const ProductMatchingResults: React.FC<{
         </div>
         <Button onClick={onEdit}>Edit requirements</Button>
       </div>
-      {result.explanation && <Alert className="ai-match-explanation" type="info" showIcon message={result.explanation} />}
+      {result.explanation && <Alert className="ai-match-explanation" type="info" showIcon title={result.explanation} />}
       {result.exact_match_count === 0 && (
         <Alert
           className="ai-match-status"
           type="warning"
           showIcon
-          message="No exact product matches found in our catalogue."
+          title="No exact product matches found in our catalogue."
           description="Relevant alternatives, if available, are shown separately below."
           action={<Button loading={creatingDemand} onClick={onCreateDemand}>Create Demand</Button>}
         />
@@ -470,8 +470,12 @@ export const AIRequirementConversation: React.FC = () => {
       setMatchingResult(null);
       setMatchingError(null);
       setMessages((current) => [...current, makeMessage('assistant', response.assistant_message)]);
-    } catch {
-      setError('MarketTwin AI is temporarily unavailable. Please try again.');
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'MarketTwin AI is temporarily unavailable. Please try again.'
+      );
       setFailedTurn(turn);
     } finally {
       setLoading(false);
@@ -805,7 +809,7 @@ export const AIRequirementConversation: React.FC = () => {
               className="ai-conversation-error"
               type="error"
               showIcon
-              message={error}
+              title={error}
               action={
                 failedTurn && (
                   <Button
@@ -886,7 +890,7 @@ export const AIRequirementConversation: React.FC = () => {
               className="ai-conversation-error"
               type="error"
               showIcon
-              message={error}
+              title={error}
               action={
                 failedTurn && (
                   <Button
@@ -1011,7 +1015,7 @@ export const AIRequirementConversation: React.FC = () => {
                     />
                   </label>
                   {priceEditError && (
-                    <Alert className="ai-conversation-error" type="error" showIcon message={priceEditError} />
+                    <Alert className="ai-conversation-error" type="error" showIcon title={priceEditError} />
                   )}
                   <div className="ai-requirement-actions">
                     <Button type="primary" onClick={savePriceEdits}>Save price details</Button>
@@ -1036,7 +1040,7 @@ export const AIRequirementConversation: React.FC = () => {
                   className="ai-conversation-error"
                   type="error"
                   showIcon
-                  message={matchingError}
+                  title={matchingError}
                   action={
                     <Button type="link" onClick={() => void confirmRequirementsAndFindProducts()}>
                       Retry
@@ -1063,7 +1067,7 @@ export const AIRequirementConversation: React.FC = () => {
           {matchingResult && (
             <>
               {createDemandError && (
-                <Alert type="error" showIcon message={createDemandError} />
+                <Alert type="error" showIcon title={createDemandError} />
               )}
               <ProductMatchingResults
                 result={matchingResult}

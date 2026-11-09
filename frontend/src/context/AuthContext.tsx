@@ -100,6 +100,35 @@ const clearUserScopedDrafts = (userId: string | null = null): void => {
   }
 };
 
+const isSupabaseAuthKey = (key: string): boolean =>
+  (key.startsWith('sb-') && key.includes('-auth-token')) || key === 'supabase.auth.token';
+
+const clearStoredSupabaseSession = (): void => {
+  const clearStorage = (storage: Storage): void => {
+    try {
+      const keysToRemove: string[] = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key && isSupabaseAuthKey(key)) keysToRemove.push(key);
+      }
+      keysToRemove.forEach((key) => storage.removeItem(key));
+    } catch (error) {
+      console.warn('Unable to clear stored Supabase session data.', error);
+    }
+  };
+
+  try {
+    clearStorage(window.localStorage);
+  } catch (error) {
+    console.warn('Unable to access local storage while clearing the session.', error);
+  }
+  try {
+    clearStorage(window.sessionStorage);
+  } catch (error) {
+    console.warn('Unable to access session storage while clearing the session.', error);
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -329,11 +358,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    clearUserScopedDrafts(currentUserId.current);
-    if (supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-    }
+    const previousUserId = currentUserId.current;
+    clearUserScopedDrafts(previousUserId);
+
+    // Clear the authenticated state first so protected routes stop rendering
+    // immediately, even if the network request to Supabase is slow.
     currentUserId.current = null;
     setSession(null);
     setUser(null);
@@ -341,6 +370,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRole(null);
     setProfileError(null);
     setProfileLoading(false);
+
+    if (!supabase) {
+      clearStoredSupabaseSession();
+      return;
+    }
+
+    try {
+      // Global scope revokes every session for this account. Supabase reads
+      // the token from storage, so persisted data is cleared only afterwards.
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error) throw error;
+    } catch (error) {
+      console.warn('Global sign-out failed; clearing the local session instead.', error);
+      try {
+        const { error: localError } = await supabase.auth.signOut({ scope: 'local' });
+        if (localError) throw localError;
+      } catch (localError) {
+        console.warn('Local sign-out failed; removing stored session data.', localError);
+      }
+    } finally {
+      // A concurrent token refresh can re-persist credentials; guarantee the
+      // stored session is cleared once sign-out settles.
+      clearStoredSupabaseSession();
+    }
   };
 
   return (

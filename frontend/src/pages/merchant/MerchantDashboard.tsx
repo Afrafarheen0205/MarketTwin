@@ -208,7 +208,7 @@ export const MerchantDashboard: React.FC = () => {
       title: 'Action',
       key: 'action',
       render: (_, record) => (
-        <Button type="primary" size="small" onClick={() => navigate(`/merchant/demands/${record.id}`)}>
+        <Button type="primary" size="small" onClick={() => navigate(`/merchant/offers/submit?group=${record.id}`)}>
           Submit Offer
         </Button>
       ),

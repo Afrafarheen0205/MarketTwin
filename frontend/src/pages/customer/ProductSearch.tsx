@@ -620,7 +620,7 @@ export const ProductSearch: React.FC = () => {
       {/* 4. Similar Products Guidance Banner when No Exact Match Exists */}
       {searchResult && !searchResult.has_exact_match && searchResult.total > 0 && (
         <Alert
-          message={
+          title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -647,7 +647,7 @@ export const ProductSearch: React.FC = () => {
 
       {errorMsg && (
         <Alert
-          message="Search Error"
+          title="Search Error"
           description={errorMsg}
           type="error"
           showIcon
@@ -694,7 +694,7 @@ export const ProductSearch: React.FC = () => {
             </Paragraph>
 
             <Alert
-              message={
+              title={
                 <div style={{ fontSize: 13, color: '#334155', textAlign: 'left' }}>
                   <strong>E-Commerce Store Link:</strong> External e-commerce product feeds are not linked yet. Once connected, items matching your specifications will stream and rank here automatically.
                 </div>

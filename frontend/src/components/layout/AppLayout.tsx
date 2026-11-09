@@ -15,7 +15,6 @@ import {
   List,
   Segmented,
   Input,
-  message,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -104,13 +103,14 @@ export const AppLayout: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut();
-      navigate('/', { replace: true });
-    } catch (error) {
-      console.error('Unable to sign out of the current account.', error);
-      message.error('Unable to sign out. Please try again.');
-    }
+    // Move off any protected route first; defer signOut to a macrotask so the
+    // navigation commits before the session is cleared, otherwise the
+    // protected-route guard redirects to /login instead of home.
+    navigate('/', { replace: true });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await signOut();
   };
 
   // Backend Health Polling
@@ -535,7 +535,7 @@ export const AppLayout: React.FC = () => {
                 <span>Notifications</span>
               </div>
               <div
-                onClick={() => navigate('/')}
+                onClick={handleLogout}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
