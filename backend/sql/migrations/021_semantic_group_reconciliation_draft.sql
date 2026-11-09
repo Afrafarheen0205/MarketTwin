@@ -1754,15 +1754,15 @@ BEGIN
                OR v_member.quantity_committed IS DISTINCT FROM (v_member_snapshot->>'quantity_committed')::NUMERIC
                OR v_member.membership_status IS DISTINCT FROM v_member_snapshot->>'membership_status'
                OR v_member.removed_at IS DISTINCT FROM
-                    CASE WHEN jsonb_typeof(v_member_snapshot->'removed_at') = 'null'
-                         THEN NULL ELSE (v_member_snapshot->>'removed_at')::TIMESTAMPTZ END
+                (CASE WHEN jsonb_typeof(v_member_snapshot->'removed_at') = 'null'
+                     THEN NULL ELSE (v_member_snapshot->>'removed_at')::TIMESTAMPTZ END)
                OR v_member.joined_at IS DISTINCT FROM (v_member_snapshot->>'joined_at')::TIMESTAMPTZ
                OR v_member.original_target_price IS DISTINCT FROM
-                    CASE WHEN jsonb_typeof(v_member_snapshot->'original_target_price') = 'null'
-                         THEN NULL ELSE (v_member_snapshot->>'original_target_price')::NUMERIC END
+                (CASE WHEN jsonb_typeof(v_member_snapshot->'original_target_price') = 'null'
+                     THEN NULL ELSE (v_member_snapshot->>'original_target_price')::NUMERIC END)
                OR v_member.original_budget IS DISTINCT FROM
-                    CASE WHEN jsonb_typeof(v_member_snapshot->'original_budget') = 'null'
-                         THEN NULL ELSE (v_member_snapshot->>'original_budget')::NUMERIC END THEN
+                (CASE WHEN jsonb_typeof(v_member_snapshot->'original_budget') = 'null'
+                     THEN NULL ELSE (v_member_snapshot->>'original_budget')::NUMERIC END) THEN
                 RAISE EXCEPTION 'Candidate membership changed during compatibility assessment' USING ERRCODE = '40001';
             END IF;
         END LOOP;
