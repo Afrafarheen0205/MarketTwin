@@ -135,5 +135,6 @@ async def continue_conversation(request: Request) -> AIConversationResponse:
     except AIProviderInvalidResponse as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The AI provider returned an invalid response. Please try again.",
+            detail=exc.public_message
+            or "The AI provider returned an invalid response. Please try again.",
         ) from exc

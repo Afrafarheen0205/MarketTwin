@@ -405,6 +405,19 @@ def _specification_key_value(item: str) -> tuple[str, str]:
     folded = normalized.casefold()
     if folded in {"and", "or", "with", "including", "featuring", "equipped with"}:
         return "", ""
+    purchase_quantity = re.fullmatch(
+        r"(?:(?:purchase|order|requested)\s+)?quantity\s*"
+        r"(?:(?:of|is)\s+|[:=]\s*)?"
+        r"(?P<amount>\d+(?:[.,]\d+)?)\s*"
+        r"(?P<unit>units?|pieces?|items?|pcs?|laptops?|phones?|sets?|packs?|boxes?)?",
+        normalized,
+        re.IGNORECASE,
+    )
+    if purchase_quantity:
+        amount = purchase_quantity.group("amount").replace(",", ".")
+        unit = purchase_quantity.group("unit")
+        value = f"{amount} {unit}" if unit else amount
+        return "purchase_quantity", value
     battery_capacity = _BATTERY_CAPACITY_PATTERN.search(normalized)
     if battery_capacity:
         amount = battery_capacity.group("amount").replace(",", "")
@@ -1252,7 +1265,7 @@ def _extract_explicit_requirements(
                 if _COUNTABLE_PRODUCT_PATTERN.search(existing_product):
                     extracted.commercial_constraints["unit"] = "units"
 
-    return extracted
+    return RequirementDraft.model_validate(extracted.model_dump())
 
 
 def _has_purchase_quantity(draft: RequirementDraft) -> bool:

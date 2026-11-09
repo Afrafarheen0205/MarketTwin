@@ -287,6 +287,7 @@ class ProductMatchingService:
         self._explanation_provider = explanation_provider or OllamaProvider(self._settings)
 
     async def match(self, draft: RequirementDraft) -> ProductMatchingResponse:
+        draft = RequirementDraft.model_validate(draft.model_dump())
         snapshot = await self._catalogue_service.fetch_products()
         candidates = [
             _evaluate_product(record, *_product_relevance(record, draft), draft)

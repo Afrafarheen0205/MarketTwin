@@ -407,6 +407,80 @@ def test_matcher_returns_exact_product_with_real_price_stock_rating_and_delivery
     assert matched.delivery_days == 3
 
 
+def test_purchase_quantity_is_normalized_out_of_mandatory_specifications():
+    draft_data = _draft().model_dump()
+    draft_data["mandatory_requirements"][" Purchase   Quantity "] = "6"
+
+    draft = RequirementDraft.model_validate(draft_data)
+
+    assert not any(
+        key.casefold().replace(" ", "_") in {"quantity", "purchase_quantity"}
+        for key in draft.mandatory_requirements
+    )
+    assert draft.commercial_constraints["quantity"] == "1"
+
+    draft_data["commercial_constraints"].pop("quantity")
+    normalized_without_commercial_quantity = RequirementDraft.model_validate(
+        draft_data
+    )
+    assert (
+        normalized_without_commercial_quantity.commercial_constraints["quantity"]
+        == "6"
+    )
+
+
+@pytest.mark.parametrize(
+    ("requested_quantity", "stock", "expected_state", "expected_exact_count"),
+    [
+        ("1", 10, "PASS", 1),
+        ("6", 6, "PASS", 1),
+        ("7", 6, "FAIL", 0),
+        ("1", None, "UNKNOWN", 0),
+    ],
+)
+def test_purchase_quantity_is_validated_against_catalogue_stock(
+    requested_quantity,
+    stock,
+    expected_state,
+    expected_exact_count,
+):
+    draft_data = _draft().model_dump()
+    draft_data["commercial_constraints"]["quantity"] = requested_quantity
+    draft_data["mandatory_requirements"]["quantity"] = requested_quantity
+    draft = RequirementDraft.model_validate(draft_data)
+    product = _product(
+        f"STOCK-{requested_quantity}-{stock}",
+        stock=stock,
+        specifications={
+            "processor": "Intel Core i7-1360P",
+            "RAM": "16GB",
+            "storage": "512GB SSD",
+            "display size": "13.4 inches",
+            "display type": "FHD+",
+        },
+    )
+    response = run(
+        ProductMatchingService(
+            catalogue_service=_StaticCatalogue([product]),
+            explanation_provider=_DeterministicExplanation(),
+        ).match,
+        draft,
+    )
+
+    matched_products = (
+        response.products + response.near_matches + response.excluded_products
+    )
+    assert len(matched_products) == 1
+    results = matched_products[0].mandatory_results
+    assert [item.state for item in results if item.attribute == "stock"] == [
+        expected_state
+    ]
+    assert not any(item.attribute.casefold() == "quantity" for item in results)
+    assert response.exact_match_count == expected_exact_count
+    if expected_exact_count:
+        assert response.products[0].product_id == product.product_id
+
+
 def test_hard_maximum_price_excludes_products_above_the_confirmed_limit():
     draft = _draft()
     draft.commercial_constraints.update(

@@ -23,6 +23,15 @@ class AIProviderTimeout(AIProviderError):
 class AIProviderInvalidResponse(AIProviderError):
     """The provider returned an empty, malformed, or invalid response."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        public_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.public_message = public_message
+
 
 class AIProviderConfigurationError(AIProviderError):
     """The configured AI provider is unsupported or incomplete."""

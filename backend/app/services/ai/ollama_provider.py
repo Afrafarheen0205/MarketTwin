@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from typing import Optional, Sequence
 
 import httpx
@@ -22,26 +21,6 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _MATCH_EXPLANATION_TIMEOUT_SECONDS = 3.0
 _MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024
 _MAX_STRUCTURED_RESPONSE_ATTEMPTS = 2
-_PRICE_VALUE_FIELDS = (
-    "min_target_unit_price",
-    "max_target_unit_price",
-    "target_unit_price",
-    "minimum_target_unit_price",
-    "maximum_target_unit_price",
-    "total_budget",
-    "budget",
-    "derived_max_unit_budget",
-)
-_BRACED_NUMERIC_AMOUNT = re.compile(r"^\{\s*(\d+(?:\.\d+)?)\s*\}$")
-_STRUCTURED_RESPONSE_RETRY_INSTRUCTION = (
-    "Your previous response did not pass structured response validation. Return the "
-    "complete response as one JSON object matching the supplied schema. Use a meaningful "
-    "assistant_message, never the text null, none, or undefined. Monetary amounts must be "
-    "plain positive numeric strings without braces, currency symbols, or separators. Do "
-    "not put the same key in both mandatory_requirements and optional_preferences; classify "
-    "it according to the user's wording. Omit keys with missing or empty values, and "
-    "preserve every non-empty user-stated fact."
-)
 
 
 def _normalize_provider_response(payload: object) -> object:
@@ -50,19 +29,36 @@ def _normalize_provider_response(payload: object) -> object:
     draft = payload.get("requirement_draft")
     if not isinstance(draft, dict):
         return payload
-    preferences = draft.get("optional_preferences")
-    if isinstance(preferences, dict):
-        for key, value in list(preferences.items()):
-            if isinstance(value, str) and not value.strip():
-                preferences.pop(key)
-    commercial = draft.get("commercial_constraints")
-    if not isinstance(commercial, dict):
-        return payload
-    for field in _PRICE_VALUE_FIELDS:
-        value = commercial.get(field)
-        if isinstance(value, str) and (match := _BRACED_NUMERIC_AMOUNT.fullmatch(value)):
-            commercial[field] = match.group(1)
-    return payload
+    normalized = dict(payload)
+    normalized["requirement_draft"] = RequirementDraft.model_validate(draft).model_dump()
+    return normalized
+
+
+def _validation_error_details(error: ValidationError) -> list[str]:
+    details = set()
+    for item in error.errors(include_input=False):
+        location = ".".join(str(part) for part in item["loc"]) or "response"
+        if not location.startswith("requirement_draft."):
+            location = f"requirement_draft.{location}"
+        details.add(f"{location}: {item['msg']}")
+    return sorted(details)
+
+
+def _retry_instruction(validation_details: list[str]) -> str:
+    errors = "\n".join(f"- {detail}" for detail in validation_details)
+    return (
+        "Your previous response failed structured response validation. Correct only the "
+        "invalid fields listed below, and preserve every other valid field and user-stated "
+        "fact unchanged. Return the complete response as one JSON object matching the "
+        "supplied schema. Use meaningful assistant_message text. Represent missing "
+        "constraint maps as empty objects and omit blank entries. Keep purchase quantity "
+        "and price information in commercial_constraints, genuine product specifications "
+        "in mandatory_requirements, and leave delivery_constraints empty unless delivery "
+        "was specified. Price amounts may include a currency symbol or scale; preserve "
+        "their exact numerical meaning and explicit currency. Do not invent missing price "
+        "bounds, currency, specifications, or delivery preferences.\n"
+        f"Validation errors to correct:\n{errors or '- Structured response was malformed.'}"
+    )
 
 
 async def _read_response_body(response: httpx.Response) -> bytes:
@@ -139,7 +135,9 @@ maximum_target_unit_price, and budget when needed, but never copy one target int
 bounds. A standalone "budget" without clear per-unit or total-order scope must be left
 ambiguous rather than converted to a price boundary. Store an explicitly stated currency
 code in commercial_constraints.currency. Do not infer currency, invent a bound, or
-convert currencies.
+convert currencies. Normalize amounts without changing their meaning: ₹80,000 is 80000
+INR, 80k is 80000, and 1.5 lakh is 150000. Do not place quantity or price in
+mandatory_requirements; keep only product attributes there.
 For quantity by variety, preserve every variety-to-quantity relationship and any stated
 total in string-valued commercial constraints (for example, variety_quantities and
 quantity). Do not confuse product capacity, weight, or technical measurements with
@@ -248,6 +246,7 @@ class OllamaProvider:
             except httpx.RequestError as exc:
                 raise AIProviderUnavailable("The AI provider is unavailable.") from exc
 
+            validation_details: list[str] = []
             try:
                 provider_payload = json.loads(response_body)
                 content = provider_payload["message"]["content"]
@@ -257,10 +256,7 @@ class OllamaProvider:
                 return AIProviderResponse.model_validate(parsed)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, ValidationError) as exc:
                 if isinstance(exc, ValidationError):
-                    validation_details = sorted({
-                        f"{'.'.join(str(part) for part in error['loc']) or 'response'}: {error['msg']}"
-                        for error in exc.errors(include_input=False)
-                    })
+                    validation_details = _validation_error_details(exc)
                     failure = "schema validation failed"
                     if validation_details:
                         failure += f" ({'; '.join(validation_details)})"
@@ -277,8 +273,16 @@ class OllamaProvider:
                     failure,
                 )
                 if attempt + 1 == _MAX_STRUCTURED_RESPONSE_ATTEMPTS:
+                    safe_details = "; ".join(validation_details)[:500]
+                    public_message = (
+                        "The AI provider could not produce valid structured requirements "
+                        "after retry."
+                    )
+                    if safe_details:
+                        public_message += f" Check: {safe_details}"
                     raise AIProviderInvalidResponse(
-                        "The AI provider returned an invalid structured response."
+                        "The AI provider returned an invalid structured response.",
+                        public_message=public_message,
                     ) from exc
                 ollama_messages = [
                     {
@@ -286,7 +290,7 @@ class OllamaProvider:
                         "content": (
                             ollama_messages[0]["content"]
                             + "\n\n"
-                            + _STRUCTURED_RESPONSE_RETRY_INSTRUCTION
+                            + _retry_instruction(validation_details)
                         ),
                     },
                     *ollama_messages[1:],

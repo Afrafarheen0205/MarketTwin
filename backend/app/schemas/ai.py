@@ -1,4 +1,5 @@
-from typing import Literal, Optional
+import re
+from typing import Any, Literal, Optional
 from decimal import Decimal, InvalidOperation
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -14,6 +15,76 @@ _PROVIDER_PRICE_FIELDS = (
     "budget",
     "derived_max_unit_budget",
 )
+_PRICE_AMOUNT_PATTERN = re.compile(
+    r"^\s*(?:(?P<prefix>maximum(?:\s+budget)?|minimum(?:\s+budget)?|"
+    r"max(?:imum)?|min(?:imum)?|up\s+to|at\s+most|at\s+least|"
+    r"not\s+more\s+than|not\s+less\s+than|budget|price|target\s+price)\s*[:=]?\s*)?"
+    r"(?:(?P<symbol>₹|Rs\.?|INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|"
+    r"\$|€|£|¥)\s*)?"
+    r"(?:\{\s*)?(?P<number>(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d+)?)"
+    r"\s*(?P<scale>k|thousand|lakh|lakhs|lac|lacs|million|mn|crore|crores)?"
+    r"\s*\}?\s*(?P<suffix>INR|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|SGD|NZD|"
+    r"rupees?|dollars?|euros?|pounds?)?\s*(?:only)?\s*$",
+    re.IGNORECASE,
+)
+_PRICE_SCALES = {
+    "k": Decimal(1000),
+    "thousand": Decimal(1000),
+    "lakh": Decimal(100000),
+    "lakhs": Decimal(100000),
+    "lac": Decimal(100000),
+    "lacs": Decimal(100000),
+    "million": Decimal(1000000),
+    "mn": Decimal(1000000),
+    "crore": Decimal(10000000),
+    "crores": Decimal(10000000),
+}
+_CURRENCY_CODES = {
+    "₹": "INR",
+    "rs": "INR",
+    "rs.": "INR",
+    "rupee": "INR",
+    "rupees": "INR",
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+}
+
+
+def _normalize_price_amount(value: Any) -> tuple[Any, Optional[str]]:
+    if isinstance(value, bool):
+        return value, None
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            amount = Decimal(str(value))
+        except InvalidOperation:
+            return value, None
+        if not amount.is_finite():
+            return value, None
+        return format(amount.normalize(), "f"), None
+    if not isinstance(value, str):
+        return value, None
+
+    match = _PRICE_AMOUNT_PATTERN.fullmatch(value)
+    if match is None:
+        return value, None
+    try:
+        amount = Decimal(match.group("number").replace(",", ""))
+    except InvalidOperation:
+        return value, None
+    scale = match.group("scale")
+    if scale:
+        amount *= _PRICE_SCALES[scale.casefold()]
+    if not amount.is_finite():
+        return value, None
+    currency_token = match.group("suffix") or match.group("symbol")
+    currency = _CURRENCY_CODES.get(currency_token.casefold()) if currency_token else None
+    if currency is None and currency_token:
+        token = currency_token.casefold()
+        if re.fullmatch(r"[a-z]{3}", token):
+            currency = token.upper()
+    return format(amount.normalize(), "f"), currency
 
 
 class ConversationMessage(BaseModel):
@@ -78,6 +149,120 @@ class RequirementDraft(BaseModel):
             "requirement for delivery timing or instructions."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_constraint_maps(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized = dict(value)
+        map_fields = (
+            "mandatory_requirements",
+            "optional_preferences",
+            "commercial_constraints",
+            "delivery_constraints",
+        )
+        for field in map_fields:
+            constraints = value.get(field)
+            if constraints is None:
+                normalized[field] = {}
+                continue
+            if not isinstance(constraints, dict):
+                continue
+
+            cleaned = {}
+            for key, item in constraints.items():
+                if item is None or isinstance(item, str) and not item.strip():
+                    continue
+                cleaned[key] = item
+            normalized[field] = cleaned
+
+        commercial = normalized.get("commercial_constraints")
+        if isinstance(commercial, dict):
+            commercial = dict(commercial)
+            explicit_currencies = set()
+            for field in _PROVIDER_PRICE_FIELDS:
+                if field not in commercial:
+                    continue
+                amount, currency = _normalize_price_amount(commercial[field])
+                commercial[field] = amount
+                if currency:
+                    explicit_currencies.add(currency)
+            if (
+                len(explicit_currencies) == 1
+                and not commercial.get("currency")
+            ):
+                commercial["currency"] = next(iter(explicit_currencies))
+            normalized["commercial_constraints"] = commercial
+        return normalized
+
+    @model_validator(mode="before")
+    @classmethod
+    def move_purchase_quantity_to_commercial_constraints(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        mandatory = value.get("mandatory_requirements")
+        if not isinstance(mandatory, dict):
+            return value
+
+        quantity_key = re.compile(
+            r"^(?:(?:purchase|order|requested)_)?quantity(?:_(\d+(?:_\d+)?))?$"
+        )
+        quantity_entries = []
+        for key, item in mandatory.items():
+            normalized_key = re.sub(
+                r"[^a-z0-9]+", "_", str(key).casefold()
+            ).strip("_")
+            match = quantity_key.fullmatch(normalized_key)
+            if match is None:
+                continue
+            encoded_quantity = match.group(1)
+            if encoded_quantity:
+                quantity = encoded_quantity.replace("_", ".")
+                quantity_entries.append((key, quantity, None))
+                continue
+            quantity_value = str(item).strip()
+            value_match = re.fullmatch(
+                r"(\d+(?:[.,]\d+)?)\s*(units?|pieces?|items?|pcs?|laptops?|"
+                r"phones?|sets?|packs?|boxes?)?",
+                quantity_value,
+                re.IGNORECASE,
+            )
+            if value_match:
+                unit = value_match.group(2)
+                normalized_unit = (
+                    "units"
+                    if unit and unit.casefold() in {"laptop", "laptops", "phone", "phones"}
+                    else unit.casefold() if unit else None
+                )
+                quantity_entries.append(
+                    (key, value_match.group(1).replace(",", "."), normalized_unit)
+                )
+        if not quantity_entries:
+            return value
+
+        normalized = dict(value)
+        normalized_mandatory = dict(mandatory)
+        for key, _, _ in quantity_entries:
+            normalized_mandatory.pop(key)
+        normalized["mandatory_requirements"] = normalized_mandatory
+
+        commercial = value.get("commercial_constraints")
+        normalized_commercial = dict(commercial) if isinstance(commercial, dict) else {}
+        existing_quantity = normalized_commercial.get("quantity")
+        quantities = {quantity for _, quantity, _ in quantity_entries}
+        if existing_quantity is None or not str(existing_quantity).strip():
+            if len(quantities) > 1:
+                raise ValueError("Purchase quantity must have one unambiguous value.")
+            normalized_commercial["quantity"] = quantities.pop()
+        if not normalized_commercial.get("unit"):
+            units = {unit for _, _, unit in quantity_entries if unit}
+            if len(units) == 1:
+                normalized_commercial["unit"] = units.pop()
+        normalized["commercial_constraints"] = normalized_commercial
+        return normalized
 
     @field_validator("product_name", "product_type", "category")
     @classmethod
@@ -160,8 +345,8 @@ class AIProviderResponse(BaseModel):
             if value is None:
                 continue
             try:
-                amount = Decimal(value)
-            except InvalidOperation as exc:
+                amount = Decimal(str(value))
+            except (InvalidOperation, ValueError) as exc:
                 raise ValueError(f"{field} must be a positive numeric string.") from exc
             if not amount.is_finite() or amount <= 0:
                 raise ValueError(f"{field} must be a positive numeric string.")
