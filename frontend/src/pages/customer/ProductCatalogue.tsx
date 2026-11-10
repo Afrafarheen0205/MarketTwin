@@ -304,7 +304,7 @@ export const ProductCatalogue: React.FC = () => {
 
       {/* 3. Demand-Driven Advisory Banner */}
       <Alert
-        message={
+        title={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <span>
               <ThunderboltOutlined style={{ color: '#1677FF', marginRight: 8, fontSize: 16 }} />
@@ -321,7 +321,7 @@ export const ProductCatalogue: React.FC = () => {
 
       {errorMsg && (
         <Alert
-          message="Catalogue Error"
+          title="Catalogue Error"
           description={errorMsg}
           type="error"
           showIcon

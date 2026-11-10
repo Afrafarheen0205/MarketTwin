@@ -18,6 +18,7 @@ from app.services.ai.base import (
     AIProvider,
     AIProviderConfigurationError,
     AIProviderInvalidResponse,
+    AIProviderResourceError,
     AIProviderTimeout,
     AIProviderUnavailable,
 )
@@ -98,6 +99,23 @@ def test_anonymous_conversation_returns_structured_draft(monkeypatch):
     assert data["requirement_draft"]["mandatory_requirements"]["material"] == "SS 304"
     assert data["requirement_draft"]["optional_preferences"] == {"brand": "Acme"}
     assert provider.calls == 1
+
+
+def test_conversation_reports_local_resource_failure(monkeypatch):
+    def unavailable_provider():
+        raise AIProviderResourceError(
+            "The local AI model could not be loaded because available memory is insufficient."
+        )
+
+    monkeypatch.setattr(ai_endpoint, "create_ai_provider", unavailable_provider)
+
+    response = TestClient(app).post(
+        "/api/v1/ai/conversation",
+        json={"message": "I need ten SS 304 tanks."},
+    )
+
+    assert response.status_code == 503
+    assert "memory" in response.json()["error"].casefold()
 
 
 def test_conversation_flags_missing_purchase_quantity():

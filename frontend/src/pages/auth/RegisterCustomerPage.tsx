@@ -96,7 +96,7 @@ const RegisterCustomerPage: React.FC = () => {
         {error && (
           <Alert
             type="error"
-            message={error}
+            title={error}
             style={{ marginBottom: 16 }}
             action={
               error.includes('email verification') ? (

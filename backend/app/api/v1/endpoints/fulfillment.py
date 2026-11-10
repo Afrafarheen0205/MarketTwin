@@ -50,6 +50,24 @@ async def merchant_update_status(order_id: str, payload: Dict[str, Any], current
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
+@router.patch("/merchant/orders/{order_id}/fulfillment")
+async def merchant_update_fulfillment(order_id: str, payload: Dict[str, Any], current_user=Depends(require_roles("merchant"))):
+    new_status = payload.get("status") or payload.get("order_status") or payload.get("fulfillment_status")
+    if not new_status:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status is required.")
+    message = payload.get("remarks") or payload.get("message")
+    try:
+        order = update_order_status(current_user["id"], order_id, new_status, message, extra=payload)
+        return order
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Fulfillment update failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
 @router.post("/merchant/orders/{order_id}/shipments")
 async def merchant_create_shipment(order_id: str, payload: Dict[str, Any], current_user=Depends(require_roles("merchant"))):
     try:

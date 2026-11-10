@@ -105,8 +105,18 @@ export const fetchBiddingGroup = async (groupId: string): Promise<BiddingGroup> 
   return data.group;
 };
 
+export const fetchMerchantDemand = async (demandId: string): Promise<any> => {
+  const { data } = await axiosClient.get<{ demand: any }>(`/api/v1/merchant/demands/${demandId}`);
+  return data.demand;
+};
+
 export const createOffer = async (groupId: string, payload: OfferSubmitRequest): Promise<MerchantOffer> => {
   const { data } = await axiosClient.post<MerchantOffer>(`/api/v1/merchant/demand-groups/${groupId}/offers`, payload);
+  return data;
+};
+
+export const createDemandOffer = async (demandId: string, payload: OfferSubmitRequest): Promise<MerchantOffer> => {
+  const { data } = await axiosClient.post<MerchantOffer>(`/api/v1/merchant/demands/${demandId}/offers`, payload);
   return data;
 };
 

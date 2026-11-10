@@ -458,7 +458,7 @@ export const CreateDemand: React.FC = () => {
       <Alert
         type="error"
         showIcon
-        message="Customer authentication is required to create a demand."
+        title="Customer authentication is required to create a demand."
         action={
           <Button
             onClick={() =>
@@ -486,7 +486,7 @@ export const CreateDemand: React.FC = () => {
         <Alert
           type="warning"
           showIcon
-          message="The reviewed AI summary is missing, malformed, or expired."
+          title="The reviewed AI summary is missing, malformed, or expired."
           description="Return to product discovery and review the requirement summary again. No demand has been created."
           action={<Button onClick={handleCancel}>Return to product discovery</Button>}
         />
@@ -496,7 +496,7 @@ export const CreateDemand: React.FC = () => {
           <Paragraph style={{ marginBottom: 0 }}>{reviewedDraft.originalRequirement}</Paragraph>
         </Card>
       )}
-      {submissionError && <Alert type="error" showIcon message={submissionError} />}
+      {submissionError && <Alert type="error" showIcon title={submissionError} />}
       <Card style={{ background: '#FFFFFF', borderColor: '#EBECF0' }} styles={{ body: { padding: 28 } }}>
         <Steps
           current={currentStep}
@@ -820,7 +820,7 @@ export const CreateDemand: React.FC = () => {
                   <Alert
                     type="info"
                     showIcon
-                    message="Mandatory specifications and optional preferences are preserved as separate entries."
+                    title="Mandatory specifications and optional preferences are preserved as separate entries."
                   />
                 )}
               </div>

@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from app.core.supabase import get_supabase_client
+from app.core.supabase import get_supabase_client, get_supabase_service_client
 
 ALLOWED_TRANSITIONS = {
     "Pending Payment": ["Confirmed", "Approved", "Processing", "Cancelled"],
@@ -37,7 +37,7 @@ def _client():
 
 
 def _record_status(order_id: str, previous: str, new: str, actor_id: str, role: str, message: Optional[str] = None, location: Optional[str] = None):
-    client = _client()
+    client = _service_client()
     if client is None:
         return
     try:
@@ -122,12 +122,21 @@ def get_merchant_order(merchant_id: str, order_id: str) -> Optional[Dict[str, An
         return None
 
 
+def _service_client():
+    return get_supabase_service_client() or get_supabase_client()
+
+
 def update_order_status(merchant_id: str, order_id: str, new_status: str, message: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     client = _client()
     if client is None:
         raise RuntimeError("Supabase is not configured.")
+    service_client = _service_client()
+    if service_client is None:
+        raise RuntimeError("Supabase is not configured.")
     order = get_merchant_order(merchant_id, order_id)
     if not order:
+        raise PermissionError("Order not found.")
+    if order.get("merchant_id") and order.get("merchant_id") != merchant_id:
         raise PermissionError("Order not found.")
 
     # Guard against invalid payment cancellation or refunds
@@ -165,7 +174,7 @@ def update_order_status(merchant_id: str, order_id: str, new_status: str, messag
     if new_status == "Delivered":
         update_data["payment_status"] = "Released"
 
-    client.table("orders").update(update_data).eq("id", order_id).execute()
+    service_client.table("orders").update(update_data).eq("id", order_id).execute()
     _record_status(order_id, current, new_status, merchant_id, "merchant", message)
 
     # If carrier or tracking_number provided, ensure shipment record exists

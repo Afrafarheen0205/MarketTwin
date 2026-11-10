@@ -457,7 +457,7 @@ export const ProductDetails: React.FC = () => {
                   type="warning"
                   showIcon
                   icon={<ExclamationCircleOutlined />}
-                  message="Item Currently Out of Stock"
+                  title="Item Currently Out of Stock"
                   description="This product is currently reserved or awaiting manufacturing batch runs. You can inspect similar and alternative products below, or initiate a custom demand to aggregate volume with certified merchants."
                   style={{ borderRadius: 8, background: '#FFFBEB', borderColor: '#FDE68A' }}
                 />

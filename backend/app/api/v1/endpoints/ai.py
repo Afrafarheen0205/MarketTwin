@@ -12,6 +12,7 @@ from app.services.ai.ai_factory import create_ai_provider
 from app.services.ai.base import (
     AIProviderConfigurationError,
     AIProviderInvalidResponse,
+    AIProviderResourceError,
     AIProviderTimeout,
     AIProviderUnavailable,
 )
@@ -126,6 +127,11 @@ async def continue_conversation(request: Request) -> AIConversationResponse:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="The AI provider took too long to respond. Please try again.",
+        ) from exc
+    except AIProviderResourceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
     except AIProviderUnavailable as exc:
         raise HTTPException(
