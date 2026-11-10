@@ -1,8 +1,12 @@
 import logging
+import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from uuid import UUID
 
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+
+from app.core.config import get_settings
 from app.core.security import get_current_user, require_roles
 from app.schemas.demand import (
     AttachmentResponse,
@@ -11,72 +15,91 @@ from app.schemas.demand import (
     DemandResponse,
     DemandUpdateRequest,
 )
+from app.schemas.demand_analysis import DemandAnalysisResponse
 from app.services.demand_service import (
+    DemandPersistenceError,
     add_attachment,
     cancel_demand,
     create_demand,
     get_attachments,
+    get_analysis_dataset,
     get_demand,
     list_demands,
     update_demand,
 )
+from app.services.demand_analysis_service import analyze_demands, is_eligible_demand
+from app.services.demand_mapping import database_row_to_api_response
 
 logger = logging.getLogger("markettwin.api.demands")
 router = APIRouter()
 
-
 def _to_response(demand: dict) -> DemandResponse:
-    return DemandResponse(
-        id=str(demand.get("id")),
-        customer_id=str(demand.get("customer_id")),
-        product_name=demand.get("product_name"),
-        category=demand.get("category"),
-        description=demand.get("description"),
-        brand=demand.get("brand"),
-        model_number=demand.get("model_number"),
-        technical_specifications=demand.get("technical_specifications") or [],
-        dimensions=demand.get("dimensions") or {},
-        material=demand.get("material"),
-        certifications=demand.get("certifications") or [],
-        quantity=float(demand.get("quantity") or 0),
-        unit=demand.get("unit") or "units",
-        target_unit_price=demand.get("target_unit_price"),
-        maximum_budget=demand.get("maximum_budget"),
-        currency=demand.get("currency") or "USD",
-        required_delivery_date=demand.get("required_delivery_date"),
-        expected_lead_time=demand.get("expected_lead_time"),
-        delivery_address=demand.get("delivery_address") or {},
-        additional_requirements=demand.get("additional_requirements"),
-        status=demand.get("status") or "Submitted",
-        created_at=demand.get("created_at"),
-        updated_at=demand.get("updated_at"),
-    )
+    return DemandResponse.model_validate(database_row_to_api_response(demand))
 
 
 @router.post("", response_model=DemandResponse, status_code=status.HTTP_201_CREATED)
-async def create_customer_demand(payload: DemandCreateRequest, current_user=Depends(require_roles("customer"))):
+async def create_customer_demand(
+    payload: DemandCreateRequest,
+    current_user=Depends(require_roles("customer")),
+    idempotency_key: Optional[UUID] = Header(default=None, alias="Idempotency-Key"),
+):
+    if not get_settings().DEMAND_PERSISTENCE_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demand submission is disabled until the database migration and staging verification are complete.",
+        )
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An idempotency key is required for demand submission.",
+        )
     try:
-        demand = create_demand(current_user["id"], payload.model_dump())
+        demand = await create_demand(
+            current_user["id"],
+            payload.model_dump(mode="json"),
+            str(idempotency_key),
+        )
         return _to_response(demand)
+    except DemandPersistenceError as exc:
+        logger.error(
+            "Demand persistence RPC failure: %s",
+            json.dumps(exc.diagnostics, sort_keys=True),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.public_message,
+        ) from exc
     except Exception as exc:
-        logger.error(f"Demand creation failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        logger.error(
+            "Demand persistence operation failed.",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demand could not be saved. Your reviewed form has not been cleared; please retry.",
+        ) from exc
 
 
 @router.get("", response_model=DemandListResponse)
 async def get_customer_demands(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    status: Optional[str] = Query(default=None),
+    status_filter: Optional[str] = Query(default=None, alias="status"),
     search: Optional[str] = Query(default=None),
     current_user=Depends(require_roles("customer")),
 ):
     try:
-        items, total = list_demands(current_user["id"], page=page, page_size=page_size, status=status, search=search)
+        items, total = list_demands(current_user["id"], page=page, page_size=page_size, status=status_filter, search=search)
         return DemandListResponse(items=[_to_response(d) for d in items], total=total, page=page, page_size=page_size)
     except Exception as exc:
-        logger.error(f"List demands failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        logger.error(
+            "List demands operation failed.",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Your demands are temporarily unavailable.",
+        ) from exc
 
 
 @router.get("/{demand_id}", response_model=DemandResponse)
@@ -87,8 +110,60 @@ async def get_customer_demand(demand_id: str, current_user=Depends(require_roles
     return _to_response(demand)
 
 
+@router.post("/{demand_id}/analyze", response_model=DemandAnalysisResponse)
+async def analyze_customer_demand(
+    demand_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    classification: str = Query(
+        default="all",
+        pattern="^(all|exact|similar|incompatible)$",
+    ),
+    current_user=Depends(require_roles("customer")),
+):
+    if not get_settings().DEMAND_ANALYSIS_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demand analysis is disabled until the privacy migration and staging verification are complete.",
+        )
+    try:
+        current, records = get_analysis_dataset(current_user["id"], demand_id)
+        if not is_eligible_demand(current):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This demand is not eligible for analysis.",
+            )
+        result = analyze_demands(
+            current,
+            records,
+            current_user["id"],
+            page=page,
+            page_size=page_size,
+            classification=classification,
+        )
+        return DemandAnalysisResponse.model_validate(result)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demand not found.") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Demand analysis operation failed.",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demand analysis is temporarily unavailable.",
+        ) from exc
+
+
 @router.put("/{demand_id}", response_model=DemandResponse)
 async def update_customer_demand(demand_id: str, payload: DemandUpdateRequest, current_user=Depends(require_roles("customer"))):
+    if not get_settings().DEMAND_PERSISTENCE_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demand updates are disabled until the database migration and staging verification are complete.",
+        )
     try:
         demand = update_demand(current_user["id"], demand_id, payload.model_dump(exclude_unset=True))
         return _to_response(demand)

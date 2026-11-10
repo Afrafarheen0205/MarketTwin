@@ -5,6 +5,10 @@ import { MailOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
 import axiosClient from '../../api/axiosClient';
+import {
+  authReturnState,
+  safeAuthReturnLocation,
+} from '../../utils/authReturnLocation';
 
 const { Title, Text } = Typography;
 
@@ -13,7 +17,11 @@ const LoginPage: React.FC = () => {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { signIn, signOut } = useAuth();
-  const selectedRole = (searchParams.get('role') as 'customer' | 'merchant' | 'admin') || 'customer';
+  const requestedRole = searchParams.get('role');
+  const selectedRole =
+    requestedRole === 'admin' || requestedRole === 'merchant'
+      ? requestedRole
+      : 'customer';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +60,13 @@ const LoginPage: React.FC = () => {
       return;
     }
 
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      await signOut();
+      setLoading(false);
+      setError('Unable to verify authenticated user.');
+      return;
+    }
     const userId = userData.user?.id;
     if (!userId) {
       await signOut();
@@ -61,7 +75,17 @@ const LoginPage: React.FC = () => {
       return;
     }
 
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single();
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single();
+    if (profileError) {
+      await signOut();
+      setLoading(false);
+      setError('Unable to verify this account role. Please try again.');
+      return;
+    }
     const actualRole = profile?.role as string | undefined;
 
     if (actualRole !== selectedRole) {
@@ -71,9 +95,22 @@ const LoginPage: React.FC = () => {
       return;
     }
 
+    if (actualRole === 'customer' && !userData.user?.email_confirmed_at) {
+      await signOut();
+      setLoading(false);
+      setError('Verify your email address before signing in.');
+      return;
+    }
+
     setLoading(false);
-    const target =
-      actualRole === 'admin' ? '/admin/dashboard' : actualRole === 'merchant' ? '/merchant/dashboard' : '/customer/dashboard';
+    const returnLocation = safeAuthReturnLocation(location.state);
+    const target = actualRole === 'customer' && returnLocation
+      ? `${returnLocation.pathname}${returnLocation.search}${returnLocation.hash}`
+      : actualRole === 'admin'
+        ? '/admin/dashboard'
+        : actualRole === 'merchant'
+          ? '/merchant/dashboard'
+          : '/customer/dashboard';
     navigate(target, { replace: true });
   };
 
@@ -84,7 +121,7 @@ const LoginPage: React.FC = () => {
           <Title level={3} style={{ margin: 0, color: '#172B4D' }}>Sign in to MarketTwin</Title>
           <Text type="secondary">Choose your role and use your Supabase account.</Text>
         </Space>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>
             <Input prefix={<MailOutlined />} />
@@ -100,7 +137,18 @@ const LoginPage: React.FC = () => {
         </Form>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
           <Link to="/auth/forgot-password">Forgot password?</Link>
-          <Link to="/auth/register/customer">Create account</Link>
+          <Link
+            to="/auth/register/customer"
+            state={authReturnState(
+              safeAuthReturnLocation(location.state) || {
+                pathname: '/customer/dashboard',
+                search: '',
+                hash: '',
+              }
+            )}
+          >
+            Create account
+          </Link>
         </div>
       </Card>
     </div>

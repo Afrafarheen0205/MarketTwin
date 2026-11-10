@@ -1,16 +1,22 @@
+import ssl
 import logging
 from typing import Optional, Tuple
+
+import httpx
+import truststore
 from app.core.config import get_settings
 
 logger = logging.getLogger("markettwin.supabase")
 
 _supabase_client = None
+_supabase_service_client = None
 
 
 def reset_supabase_client():
-    """Reset cached Supabase client so a fresh HTTP connection pool is created."""
-    global _supabase_client
+    """Reset cached Supabase clients so fresh HTTP connection pools are created."""
+    global _supabase_client, _supabase_service_client
     _supabase_client = None
+    _supabase_service_client = None
 
 
 def get_supabase_client(force_new: bool = False):
@@ -34,14 +40,70 @@ def get_supabase_client(force_new: bool = False):
         return None
 
     try:
-        from supabase import create_client, Client
+        from supabase import Client, ClientOptions, create_client
         # Prefer service role key for backend operations if available, otherwise fall back to anon key
         key_to_use = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
-        _supabase_client = create_client(settings.SUPABASE_URL, key_to_use)
+        client_options = ClientOptions()
+        client_options.headers["User-Agent"] = "MarketTwin-backend/1.0"
+        client_options.httpx_client = httpx.Client(
+            verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+            follow_redirects=True,
+            http2=True,
+        )
+        _supabase_client = create_client(
+            settings.SUPABASE_URL,
+            key_to_use,
+            options=client_options,
+        )
         logger.info("Supabase client initialized successfully.")
         return _supabase_client
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {str(e)}")
+        return None
+
+
+def get_supabase_service_client(force_new: bool = False):
+    """Return a cached client authenticated only with the service-role key."""
+    global _supabase_service_client
+    if force_new:
+        _supabase_service_client = None
+    if _supabase_service_client is not None:
+        return _supabase_service_client
+
+    settings = get_settings()
+    service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
+    if (
+        not settings.SUPABASE_URL
+        or "placeholder" in settings.SUPABASE_URL.lower()
+        or not service_role_key
+        or not service_role_key.strip()
+        or "placeholder" in service_role_key.lower()
+    ):
+        logger.info("Supabase service-role credentials are not configured.")
+        return None
+
+    try:
+        from supabase import ClientOptions, create_client
+
+        client_options = ClientOptions()
+        client_options.headers["User-Agent"] = "MarketTwin-backend/1.0"
+        client_options.httpx_client = httpx.Client(
+            verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+            follow_redirects=True,
+            http2=True,
+        )
+        _supabase_service_client = create_client(
+            settings.SUPABASE_URL,
+            service_role_key,
+            options=client_options,
+        )
+        logger.info("Supabase service-role client initialized successfully.")
+        return _supabase_service_client
+    except Exception as exc:
+        logger.error(
+            "Failed to initialize Supabase service-role client (%s).",
+            type(exc).__name__,
+        )
         return None
 
 

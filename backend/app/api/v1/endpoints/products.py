@@ -1,7 +1,9 @@
 import logging
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from typing import Annotated, List, Optional, Union
+from fastapi import APIRouter, Body, HTTPException, Query, status
+from pydantic import Field
 
+from app.schemas.ai import RequirementDraft
 from app.schemas.product import (
     ProductListResponse,
     ProductMatchRequest,
@@ -9,7 +11,14 @@ from app.schemas.product import (
     ProductResponse,
     ProductSearchResponse,
 )
+from app.schemas.product_matching import ProductMatchingResponse
 from app.services.product_service import ProductService
+from app.services.product_matching_service import ProductMatchingService
+from app.services.buyora_catalogue_service import (
+    CatalogueInvalidResponse,
+    CatalogueTimeout,
+    CatalogueUnavailable,
+)
 
 logger = logging.getLogger("markettwin.api.products")
 router = APIRouter()
@@ -115,12 +124,46 @@ async def search_products(
         )
 
 
-@router.post("/match", response_model=ProductMatchResponse, summary="Match demand specifications against existing catalogue")
-async def match_product_specifications(payload: ProductMatchRequest):
+@router.post(
+    "/match",
+    response_model=Union[ProductMatchingResponse, ProductMatchResponse],
+    summary="Match Phase 1 requirements or legacy demand specifications against a catalogue",
+)
+async def match_product_specifications(
+    payload: Annotated[
+        Union[RequirementDraft, ProductMatchRequest],
+        Field(union_mode="left_to_right"),
+    ] = Body(...),
+):
     """
     Evaluate incoming customer requirements or demand specifications against verified catalogue items.
     Returns ranked matches, recommendation ('use_catalog' vs. 'create_demand'), and prefilled demand parameters.
     """
+    if isinstance(payload, RequirementDraft):
+        try:
+            return await ProductMatchingService().match(payload)
+        except CatalogueTimeout as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="The product catalogue is taking longer than expected. Please try again shortly.",
+            ) from exc
+        except CatalogueInvalidResponse as exc:
+            logger.warning("Product matching received invalid Buyora catalogue data.")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The product catalogue returned an invalid response. Please try again later.",
+            ) from exc
+        except CatalogueUnavailable as exc:
+            failure_type = type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
+            logger.warning(
+                "Product matching could not load the Buyora catalogue (%s).",
+                failure_type,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The product catalogue is temporarily unavailable. Please try again shortly.",
+            ) from exc
+
     try:
         return ProductService.match_demand_parameters(payload)
     except Exception as exc:

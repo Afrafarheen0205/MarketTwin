@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Row,
@@ -11,6 +11,7 @@ import {
   message,
   Rate,
   Alert,
+  Select,
 } from 'antd';
 import {
   EyeOutlined,
@@ -22,47 +23,49 @@ import {
   TrophyOutlined,
   DiffOutlined,
 } from '@ant-design/icons';
-import { supabase } from '../../services/supabase';
-import axiosClient from '../../api/axiosClient';
+import { acceptOffer, customerTotal, fetchCustomerOffers, formatOfferCurrency, isCurrencyAvailable, offerError, type CustomerOffer } from '../../services/offerService';
 
 const { Title, Text } = Typography;
 
 export const OfferComparison: React.FC = () => {
   const navigate = useNavigate();
   const [syncing, setSyncing] = useState(false);
-  const [selectedOffer, setSelectedOffer] = useState<any | null>(null);
+  const [selectedOffer, setSelectedOffer] = useState<CustomerOffer | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [timeRange, setTimeRange] = useState('Today');
-
-  const [comparisonOffers, setComparisonOffers] = useState<any[]>([]);
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await axiosClient.get('/api/v1/customer/offers');
-        setComparisonOffers((res.data.items || []).slice(0, 3));
-      } catch (e) {}
-    };
-    load();
-  }, []);
-
-  const handleSync = () => {
+  const [demandId, setDemandId] = useState('');
+  const [offers, setOffers] = useState<CustomerOffer[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const inFlight = useRef(false);
+  const handleSync = async () => {
     setSyncing(true);
-    setTimeout(() => {
-      setSyncing(false);
-      message.success('Competitive proposal rankings refreshed.');
-    }, 600);
+    try { setOffers(await fetchCustomerOffers()); setError(null); }
+    catch (failure) { setError(offerError(failure)); }
+    finally { setSyncing(false); }
   };
+  useEffect(() => { handleSync(); }, []);
+  const selectedDemandId = demandId || offers[0]?.customer_demand_id;
+  const comparisonOffers = offers.filter(offer => offer.customer_demand_id === selectedDemandId)
+    .sort((left, right) => Number(left.unit_price) - Number(right.unit_price));
+  const deliveryDays = comparisonOffers.flatMap(offer => offer.delivery_days == null ? [] : [offer.delivery_days]);
 
-  const handleApproveFinal = () => {
-    if (!selectedOffer || !confirmed) return;
-    message.success(`Explicitly approved offer ${selectedOffer.offerCode} from ${selectedOffer.merchantName}!`);
-    setSelectedOffer(null);
-    setConfirmed(false);
-    navigate('/customer/orders');
+  const handleApproveFinal = async () => {
+    if (!selectedOffer || !confirmed || !isCurrencyAvailable(selectedOffer.currency) || inFlight.current) return;
+    inFlight.current = true;
+    setSaving(true);
+    try {
+      const result = await acceptOffer(selectedOffer, confirmed);
+      message.success(`Order ${result.order.order_number} created. Payment pending.`);
+      setSelectedOffer(null);
+      setConfirmed(false);
+      navigate('/customer/orders');
+    } catch (failure) { message.error(offerError(failure)); }
+    finally { inFlight.current = false; setSaving(false); }
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 24 }}>
+      {error && <Alert type="error" title={error} showIcon />}
       {/* 1. Header (Overview + Sync / Help / Time Filter) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -96,60 +99,11 @@ export const OfferComparison: React.FC = () => {
             <SyncOutlined spin={syncing} style={{ fontSize: 12, color: '#64748B' }} />
           </button>
 
-          <button
-            onClick={() =>
-              message.info(
-                'Comparison Matrix: Review pricing, warranties, lead times, and supplier trust scores before making your selection.'
-              )
-            }
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              background: '#FFFFFF',
-              border: '1px solid #E2E8F0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#64748B',
-              cursor: 'pointer',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-            }}
-          >
-            <QuestionCircleOutlined style={{ fontSize: 14 }} />
-          </button>
-
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'today', label: 'Today', onClick: () => setTimeRange('Today') },
-                { key: 'week', label: 'This Week', onClick: () => setTimeRange('This Week') },
-                { key: 'month', label: 'This Month', onClick: () => setTimeRange('This Month') },
-                { key: 'all', label: 'All Time', onClick: () => setTimeRange('All Time') },
-              ],
-            }}
-            placement="bottomRight"
-          >
-            <button
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                background: '#FFFFFF',
-                border: '1px solid #E2E8F0',
-                borderRadius: 20,
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                color: '#334155',
-                cursor: 'pointer',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-              }}
-            >
-              <span>{timeRange}</span>
-              <DownOutlined style={{ fontSize: 10, color: '#94A3B8' }} />
-            </button>
-          </Dropdown>
+          <Select aria-label="Demand to compare" value={selectedDemandId} onChange={setDemandId}
+            style={{ width: 240, maxWidth: '100%' }} loading={syncing}
+            options={[...new Map(offers.map(offer => [offer.customer_demand_id, {
+              value: offer.customer_demand_id, label: `${offer.demand_title ?? 'Demand'} (${offer.customer_quantity} units)`,
+            }])).values()]} />
         </Space>
       </div>
 
@@ -206,7 +160,7 @@ export const OfferComparison: React.FC = () => {
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 14, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 32, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>$185</span>
+              <span style={{ fontSize: 24, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>{comparisonOffers.length ? formatOfferCurrency(comparisonOffers[0].unit_price, comparisonOffers[0].currency) : 'Not available'}</span>
               <span
                 style={{
                   backgroundColor: '#EFF6FF',
@@ -217,7 +171,7 @@ export const OfferComparison: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                + 34% Savings
+                Per unit
               </span>
             </div>
           </div>
@@ -238,7 +192,7 @@ export const OfferComparison: React.FC = () => {
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 14, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 32, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>7 Days</span>
+              <span style={{ fontSize: 24, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>{deliveryDays.length ? `${Math.min(...deliveryDays)} Days` : 'Not specified'}</span>
               <span
                 style={{
                   backgroundColor: '#ECFDF5',
@@ -252,7 +206,7 @@ export const OfferComparison: React.FC = () => {
                   gap: 3,
                 }}
               >
-                <ArrowUpOutlined style={{ fontSize: 10 }} /> Express
+                Business days
               </span>
             </div>
           </div>
@@ -269,11 +223,11 @@ export const OfferComparison: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ color: '#475569', fontSize: 13, fontWeight: 500 }}>Buyer Consent Gating</span>
+              <span style={{ color: '#475569', fontSize: 13, fontWeight: 500 }}>Your Quantity</span>
               <EyeOutlined style={{ color: '#94A3B8', fontSize: 14, cursor: 'pointer' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 32, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>100%</span>
+              <span style={{ fontSize: 32, fontWeight: 700, color: '#0F172A', lineHeight: 1 }}>{comparisonOffers[0]?.customer_quantity ?? 0}</span>
               <span
                 style={{
                   backgroundColor: '#ECFDF5',
@@ -284,7 +238,7 @@ export const OfferComparison: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                Audited
+                Units
               </span>
             </div>
           </div>
@@ -330,19 +284,19 @@ export const OfferComparison: React.FC = () => {
                       boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
                     }}
                   >
-                    <TrophyOutlined /> BEST VALUE PROPOSAL
+                    <TrophyOutlined /> LOWEST UNIT PRICE
                   </div>
                 )}
 
                 <div>
                   <div style={{ textAlign: 'center', marginTop: isBestValue ? 8 : 0, marginBottom: 16 }}>
-                    <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{offer.demandTitle}</div>
+                    <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{offer.demand_title}</div>
                     <div style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: '4px 0' }}>
-                      {offer.merchantName}
+                      {offer.merchant_name ?? 'Unavailable'}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
-                      <Rate disabled defaultValue={offer.merchantRating} style={{ fontSize: 12, color: '#F59E0B' }} />
-                      <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>({offer.merchantRating} / 5.0)</span>
+                      {offer.merchant_rating != null && <Rate disabled value={Number(offer.merchant_rating)} style={{ fontSize: 12, color: '#F59E0B' }} />}
+                      <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>{offer.merchant_rating ?? 'Not rated'}</span>
                     </div>
                   </div>
 
@@ -359,7 +313,7 @@ export const OfferComparison: React.FC = () => {
                   >
                     <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600 }}>Offered Wholesale Unit Price</div>
                     <div style={{ fontSize: 32, fontWeight: 800, color: '#059669', margin: '2px 0' }}>
-                      ${offer.unitPrice}
+                      {formatOfferCurrency(offer.unit_price, offer.currency)}
                     </div>
                     <span
                       style={{
@@ -372,7 +326,7 @@ export const OfferComparison: React.FC = () => {
                         display: 'inline-block',
                       }}
                     >
-                      Save ${Math.max(offer.originalTargetPrice - offer.unitPrice, 30)}/unit
+                      Your total: {formatOfferCurrency(customerTotal(offer), offer.currency)}
                     </span>
                   </div>
 
@@ -380,24 +334,26 @@ export const OfferComparison: React.FC = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, marginBottom: 24 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid #F1F5F9' }}>
                       <span style={{ color: '#64748B' }}>Delivery Lead Time:</span>
-                      <strong style={{ color: '#0F172A' }}>{offer.deliveryDays} business days</strong>
+                      <strong style={{ color: '#0F172A' }}>{offer.delivery_days ?? 'Not specified'} business days</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid #F1F5F9' }}>
                       <span style={{ color: '#64748B' }}>Manufacturer Warranty:</span>
-                      <strong style={{ color: '#0F172A' }}>{offer.warrantyMonths} months comprehensive</strong>
+                      <strong style={{ color: '#0F172A' }}>{offer.warranty_months ?? 'Not specified'} months</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid #F1F5F9' }}>
                       <span style={{ color: '#64748B' }}>Min Order Volume:</span>
-                      <strong style={{ color: '#0F172A' }}>{offer.minOrderQuantity} units</strong>
+                      <strong style={{ color: '#0F172A' }}>{offer.min_order_quantity ?? 'Not specified'} units</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: '#64748B' }}>Shipping Freight:</span>
-                      <strong style={{ color: '#0F172A' }}>{offer.shippingTerms.slice(0, 26)}...</strong>
+                      <strong style={{ color: '#0F172A', overflowWrap: 'anywhere' }}>{offer.shipping_terms ?? 'Not specified'}</strong>
                     </div>
                   </div>
                 </div>
 
                 <button
+                  disabled={offer.eligibility.status !== 'Eligible' || !isCurrencyAvailable(offer.currency) || saving}
+                  title={!isCurrencyAvailable(offer.currency) ? 'Currency unavailable; this offer cannot be accepted.' : offer.eligibility.details.checks.join(' ')}
                   onClick={() => {
                     setSelectedOffer(offer);
                     setConfirmed(false);
@@ -433,10 +389,11 @@ export const OfferComparison: React.FC = () => {
           </Space>
         }
         open={Boolean(selectedOffer)}
-        onCancel={() => setSelectedOffer(null)}
+        onCancel={() => { if (!saving) setSelectedOffer(null); }}
         footer={[
           <button
             key="cancel"
+            disabled={saving}
             onClick={() => setSelectedOffer(null)}
             style={{
               backgroundColor: '#FFFFFF',
@@ -453,7 +410,7 @@ export const OfferComparison: React.FC = () => {
           </button>,
           <button
             key="approve"
-            disabled={!confirmed}
+            disabled={!confirmed || saving}
             onClick={handleApproveFinal}
             style={{
               backgroundColor: confirmed ? '#059669' : '#CBD5E1',
@@ -466,7 +423,7 @@ export const OfferComparison: React.FC = () => {
               cursor: confirmed ? 'pointer' : 'not-allowed',
             }}
           >
-            Confirm & Place Group Order
+            {saving ? 'Placing Order...' : 'Confirm & Place Order'}
           </button>,
         ]}
         width={580}
@@ -476,13 +433,17 @@ export const OfferComparison: React.FC = () => {
             <div style={{ background: '#F8FAFC', padding: 14, borderRadius: 10, border: '1px solid #E2E8F0', marginBottom: 14 }}>
               <div style={{ fontSize: 12, color: '#64748B' }}>Winning Supplier Proposal</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>
-                {selectedOffer.merchantName} &mdash; ${selectedOffer.unitPrice}/unit
+                {selectedOffer.merchant_name}: {formatOfferCurrency(selectedOffer.unit_price, selectedOffer.currency)} per unit
               </div>
               <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 4 }}>
-                Demand: {selectedOffer.demandTitle} &bull; Delivery: {selectedOffer.deliveryDays} Days
+                Demand: {selectedOffer.demand_title}; Delivery: {selectedOffer.delivery_days ?? 'Not specified'} Days
               </div>
             </div>
 
+            <p>Quantity: {selectedOffer.customer_quantity}; Total: {formatOfferCurrency(customerTotal(selectedOffer), selectedOffer.currency)}</p>
+            <p>Shipping: {selectedOffer.shipping_terms ?? 'Not specified'}</p>
+            <p>Specifications: {selectedOffer.spec_notes ?? 'Not specified'}</p>
+            <p>Warranty: {selectedOffer.warranty_months ?? 'Not specified'} months</p>
             <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
               MarketTwin's core governance requires explicit customer approval before any contract binding or funds transfer occurs.
             </p>
@@ -493,7 +454,7 @@ export const OfferComparison: React.FC = () => {
                 onChange={(e) => setConfirmed(e.target.checked)}
               >
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#065F46' }}>
-                  I explicitly approve this offer ({selectedOffer.offerCode}) and agree to the specified fulfillment lead time of {selectedOffer.deliveryDays} days.
+                  I explicitly approve this offer ({selectedOffer.offer_code}) for {selectedOffer.customer_quantity} units and agree to the displayed terms.
                 </span>
               </Checkbox>
             </div>

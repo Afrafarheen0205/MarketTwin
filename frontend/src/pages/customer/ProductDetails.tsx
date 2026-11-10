@@ -43,7 +43,7 @@ const { Title, Text, Paragraph } = Typography;
 export const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [selectedImage, setSelectedImage] = useState<string>('');
@@ -119,15 +119,25 @@ export const ProductDetails: React.FC = () => {
       const totalAmount = unitPrice * orderQty;
 
       await createOrder({
+        order_number: `ORD-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`,
         customer_id: user.id,
-        product_title: product.name,
-        quantity: orderQty,
+        product_id: product.id,
+        product_name: product.name,
+        brand: product.brand,
+        model: product.model_number,
+        unit: product.unit,
         unit_price: unitPrice,
-        total_amount: totalAmount,
-        currency: 'USD',
-        status: 'Confirmed',
-        shipping_address: user.email || 'Customer Default Verified Logistics Address',
-        created_at: new Date().toISOString(),
+        product_image: product.images?.[0] || product.image_url,
+        specs: product.specifications || (product as any).specs || {},
+        merchant_id: (product as any).created_by || null,
+        merchant_name: product.brand || null,
+        customer_name: profile?.fullName || null,
+        customer_email: profile?.email || null,
+        customer_phone: profile?.customer?.phone || null,
+        quantity: orderQty,
+        total_price: totalAmount,
+        status: 'Approved',
+        order_date: new Date().toISOString().split('T')[0],
       });
 
       message.success(`Purchase confirmed! Your order for ${orderQty} ${product.unit || 'units'} has been placed.`);
@@ -447,7 +457,7 @@ export const ProductDetails: React.FC = () => {
                   type="warning"
                   showIcon
                   icon={<ExclamationCircleOutlined />}
-                  message="Item Currently Out of Stock"
+                  title="Item Currently Out of Stock"
                   description="This product is currently reserved or awaiting manufacturing batch runs. You can inspect similar and alternative products below, or initiate a custom demand to aggregate volume with certified merchants."
                   style={{ borderRadius: 8, background: '#FFFBEB', borderColor: '#FDE68A' }}
                 />

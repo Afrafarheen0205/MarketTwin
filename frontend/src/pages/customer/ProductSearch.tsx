@@ -21,6 +21,8 @@ import {
   Pagination,
   Badge,
   Divider,
+  Modal,
+  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -39,8 +41,30 @@ import {
   ArrowRightOutlined,
   FireOutlined,
   SwapOutlined,
+  ShoppingCartOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
-import { productApi, ProductMatchItem, ProductSearchResponse } from '../../api/productApi';
+import { useAuth } from '../../context/AuthContext';
+import { productApi, Product, ProductMatchItem, ProductSearchResponse } from '../../api/productApi';
+import { createOrder } from '../../services/orderService';
+
+// Category SVG fallback generator when remote images fail to load
+const getCategoryFallbackImage = (category: string) => {
+  const c = (category || '').toLowerCase();
+  let color1 = '#1677FF', label = 'HARDWARE';
+  if (c.includes('energy') || c.includes('power')) {
+    color1 = '#FAAD14'; label = 'ENERGY & POWER';
+  } else if (c.includes('telecom') || c.includes('network')) {
+    color1 = '#52C41A'; label = 'NETWORKING';
+  } else if (c.includes('automation') || c.includes('robotics')) {
+    color1 = '#722ED1'; label = 'AUTOMATION';
+  } else if (c.includes('medical') || c.includes('lab')) {
+    color1 = '#EB2F96'; label = 'LAB & MEDICAL';
+  } else if (c.includes('instrument')) {
+    color1 = '#13C2C2'; label = 'INSTRUMENTS';
+  }
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23F8FAFC"/><stop offset="100%" stop-color="%23EDF2F7"/></linearGradient></defs><rect width="400" height="260" fill="url(%23g)"/><rect x="155" y="75" width="90" height="90" rx="16" fill="${color1}" opacity="0.12"/><circle cx="200" cy="120" r="26" stroke="${color1}" stroke-width="3" fill="none" opacity="0.85"/><text x="200" y="195" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12" font-weight="700" fill="%2364748B" text-anchor="middle" letter-spacing="1.2">${label}</text></svg>`;
+};
 
 const { Title, Text, Paragraph } = Typography;
 const { Search } = Input;
@@ -48,6 +72,65 @@ const { Search } = Input;
 export const ProductSearch: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user, profile } = useAuth();
+
+  // Purchase Order State
+  const [orderModalVisible, setOrderModalVisible] = useState(false);
+  const [orderProduct, setOrderProduct] = useState<Product | ProductMatchItem | null>(null);
+  const [orderQty, setOrderQty] = useState<number>(1);
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+
+  const handleOpenOrderModal = (product: Product | ProductMatchItem) => {
+    setOrderProduct(product);
+    setOrderQty(product.minimum_order_quantity || 1);
+    setOrderModalVisible(true);
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!orderProduct || !user) {
+      message.error('Please log in as a customer to place an order.');
+      return;
+    }
+
+    setOrderSubmitting(true);
+    try {
+      const unitPrice =
+        orderQty >= 10
+          ? orderProduct.wholesale_price || orderProduct.retail_price
+          : orderProduct.retail_price;
+      const totalAmount = unitPrice * orderQty;
+
+      await createOrder({
+        order_number: `ORD-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`,
+        customer_id: user.id,
+        product_id: orderProduct.id,
+        product_name: orderProduct.name,
+        brand: orderProduct.brand,
+        model: orderProduct.model_number,
+        unit: orderProduct.unit,
+        unit_price: unitPrice,
+        product_image: orderProduct.images?.[0] || orderProduct.image_url,
+        specs: orderProduct.specifications || (orderProduct as any).specs || {},
+        merchant_id: (orderProduct as any).created_by || null,
+        merchant_name: orderProduct.brand || null,
+        customer_name: profile?.fullName || null,
+        customer_email: profile?.email || null,
+        customer_phone: profile?.customer?.phone || null,
+        quantity: orderQty,
+        total_price: totalAmount,
+        status: 'Approved',
+        order_date: new Date().toISOString().split('T')[0],
+      });
+
+      message.success(`Order placed successfully for ${orderQty} ${orderProduct.unit || 'unit'}(s)!`);
+      setOrderModalVisible(false);
+    } catch (err: any) {
+      console.error('Order placement failed:', err);
+      message.error(err.message || 'Failed to place order.');
+    } finally {
+      setOrderSubmitting(false);
+    }
+  };
 
   // Query & Filter States
   const [query, setQuery] = useState(searchParams.get('q') || '');
@@ -297,27 +380,42 @@ export const ProductSearch: React.FC = () => {
       title: 'Action',
       key: 'actions',
       align: 'right',
-      render: (_: any, record: ProductMatchItem) => (
-        <Space size={8}>
-          <Button
-            size="middle"
-            icon={<EyeOutlined />}
-            onClick={() => navigate(`/customer/products/${record.id}`)}
-            style={{ borderRadius: 6, fontWeight: 500 }}
-          >
-            Details
-          </Button>
-          <Button
-            size="middle"
-            type="primary"
-            icon={<AppstoreAddOutlined />}
-            onClick={() => navigate(`/customer/demands/create?product=${encodeURIComponent(record.name)}`)}
-            style={{ borderRadius: 6, background: '#1677FF', fontWeight: 600 }}
-          >
-            Demand
-          </Button>
-        </Space>
-      ),
+      render: (_: any, record: ProductMatchItem) => {
+        const inStock = record.status === 'active' && (record.available_quantity ?? 0) > 0;
+        return (
+          <Space size={8}>
+            <Button
+              size="middle"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/customer/products/${record.id}`)}
+              style={{ borderRadius: 6, fontWeight: 500 }}
+            >
+              Details
+            </Button>
+            {inStock ? (
+              <Button
+                size="middle"
+                type="primary"
+                icon={<ShoppingCartOutlined />}
+                onClick={() => handleOpenOrderModal(record)}
+                style={{ borderRadius: 6, background: '#1677FF', fontWeight: 600 }}
+              >
+                Purchase
+              </Button>
+            ) : (
+              <Button
+                size="middle"
+                type="default"
+                icon={<AppstoreAddOutlined />}
+                onClick={() => navigate(`/customer/demands/create?product=${encodeURIComponent(record.name)}`)}
+                style={{ borderRadius: 6, fontWeight: 600 }}
+              >
+                Pool Demand
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -522,7 +620,7 @@ export const ProductSearch: React.FC = () => {
       {/* 4. Similar Products Guidance Banner when No Exact Match Exists */}
       {searchResult && !searchResult.has_exact_match && searchResult.total > 0 && (
         <Alert
-          message={
+          title={
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, color: '#1E293B', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -549,7 +647,7 @@ export const ProductSearch: React.FC = () => {
 
       {errorMsg && (
         <Alert
-          message="Search Error"
+          title="Search Error"
           description={errorMsg}
           type="error"
           showIcon
@@ -596,7 +694,7 @@ export const ProductSearch: React.FC = () => {
             </Paragraph>
 
             <Alert
-              message={
+              title={
                 <div style={{ fontSize: 13, color: '#334155', textAlign: 'left' }}>
                   <strong>E-Commerce Store Link:</strong> External e-commerce product feeds are not linked yet. Once connected, items matching your specifications will stream and rank here automatically.
                 </div>
@@ -682,6 +780,7 @@ export const ProductSearch: React.FC = () => {
                 const wholesale = product.wholesale_price ?? product.min_demand_price ?? Math.round(retail * 0.75);
                 const isExact = product.match_type === 'exact';
                 const matchPct = Math.round((product.relevance_score || 0.8) * 100);
+                const inStock = product.status === 'active' && (product.available_quantity ?? 0) > 0;
 
                 return (
                   <Col xs={24} sm={12} lg={8} xl={6} key={product.id}>
@@ -713,7 +812,12 @@ export const ProductSearch: React.FC = () => {
                           <img
                             alt={product.name}
                             src={img}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              target.onerror = null;
+                              target.src = getCategoryFallbackImage(product.category);
+                            }}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 10 }}
                           />
                           {/* Match Classification Badge */}
                           <div style={{ position: 'absolute', top: 10, right: 8 }}>
@@ -845,21 +949,59 @@ export const ProductSearch: React.FC = () => {
                       <div style={{ display: 'flex', gap: 8 }}>
                         <Button
                           type="default"
-                          style={{ flex: 1, borderRadius: 6, fontWeight: 500 }}
+                          style={{
+                            flex: 1,
+                            borderRadius: 6,
+                            fontWeight: 500,
+                            height: 36,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
                           icon={<EyeOutlined />}
                           onClick={() => navigate(`/customer/products/${product.id}`)}
                         >
                           Details
                         </Button>
-                        <Button
-                          type="primary"
-                          ghost
-                          style={{ flex: 1, borderRadius: 6, fontWeight: 600 }}
-                          icon={<AppstoreAddOutlined />}
-                          onClick={() => navigate(`/customer/demands/create?product=${encodeURIComponent(product.name)}`)}
-                        >
-                          Demand
-                        </Button>
+                        {inStock ? (
+                          <Button
+                            type="primary"
+                            style={{
+                              flex: 1.25,
+                              borderRadius: 6,
+                              fontWeight: 600,
+                              background: '#1677FF',
+                              borderColor: '#1677FF',
+                              height: 36,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            icon={<ShoppingCartOutlined />}
+                            onClick={() => handleOpenOrderModal(product)}
+                          >
+                            Purchase
+                          </Button>
+                        ) : (
+                          <Button
+                            type="default"
+                            style={{
+                              flex: 1.25,
+                              borderRadius: 6,
+                              fontWeight: 600,
+                              borderColor: '#1677FF',
+                              color: '#1677FF',
+                              height: 36,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            icon={<AppstoreAddOutlined />}
+                            onClick={() => navigate(`/customer/demands/create?product=${encodeURIComponent(product.name)}`)}
+                          >
+                            Pool Demand
+                          </Button>
+                        )}
                       </div>
                     </Card>
                   </Col>
@@ -933,6 +1075,127 @@ export const ProductSearch: React.FC = () => {
           />
         </Card>
       )}
+      {/* Purchase Confirmation Modal */}
+      <Modal
+        title={
+          <Space>
+            <ShoppingCartOutlined style={{ color: '#1677FF' }} />
+            <span style={{ fontWeight: 700 }}>Confirm Commercial Order Request</span>
+          </Space>
+        }
+        open={orderModalVisible}
+        onCancel={() => setOrderModalVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setOrderModalVisible(false)}>
+            Cancel
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            loading={orderSubmitting}
+            onClick={handleConfirmOrder}
+            style={{ background: '#1677FF', fontWeight: 600 }}
+          >
+            Confirm & Place Order
+          </Button>,
+        ]}
+      >
+        {orderProduct && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 10 }}>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <img
+                src={
+                  orderProduct.images?.[0] ||
+                  orderProduct.image_url ||
+                  getCategoryFallbackImage(orderProduct.category)
+                }
+                alt={orderProduct.name}
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.onerror = null;
+                  target.src = getCategoryFallbackImage(orderProduct.category);
+                }}
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 6,
+                  objectFit: 'contain',
+                  border: '1px solid #E2E8F0',
+                  background: '#F8FAFC',
+                }}
+              />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14.5, color: '#172B4D' }}>
+                  {orderProduct.name}
+                </div>
+                <div style={{ fontSize: 12, color: '#64748B' }}>
+                  SKU: {orderProduct.model_number || orderProduct.sku} &bull; {orderProduct.category}
+                </div>
+              </div>
+            </div>
+
+            <Divider style={{ margin: '8px 0' }} />
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontSize: 12, color: '#64748B' }}>Quantity ({orderProduct.unit || 'unit'}):</span>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                  Minimum order: {orderProduct.minimum_order_quantity || 1} &bull; In stock:{' '}
+                  {orderProduct.available_quantity || 100}
+                </div>
+              </div>
+              <InputNumber
+                min={orderProduct.minimum_order_quantity || 1}
+                max={orderProduct.available_quantity || 1000}
+                value={orderQty}
+                onChange={(val) => setOrderQty(val || 1)}
+                style={{ width: 100 }}
+              />
+            </div>
+
+            <div
+              style={{
+                background: '#F8FAFC',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid #E2E8F0',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
+                <span style={{ color: '#64748B' }}>Unit Price:</span>
+                <span style={{ fontWeight: 600 }}>
+                  $
+                  {(orderQty >= 10
+                    ? orderProduct.wholesale_price || orderProduct.retail_price
+                    : orderProduct.retail_price
+                  ).toFixed(2)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
+                <span style={{ color: '#64748B' }}>Estimated Freight / Logistics:</span>
+                <span style={{ color: '#059669', fontWeight: 600 }}>Included (Escrow Protected)</span>
+              </div>
+              <Divider style={{ margin: '6px 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15 }}>
+                <strong style={{ color: '#172B4D' }}>Total Amount:</strong>
+                <strong style={{ color: '#1677FF' }}>
+                  $
+                  {(
+                    (orderQty >= 10
+                      ? orderProduct.wholesale_price || orderProduct.retail_price
+                      : orderProduct.retail_price) * orderQty
+                  ).toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#059669' }}>
+              <SafetyCertificateOutlined />
+              <span>Full MarketTwin escrow protection and pre-dispatch inspection guarantee apply.</span>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

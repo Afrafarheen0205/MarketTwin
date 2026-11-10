@@ -1,24 +1,32 @@
 import React, { useState } from 'react';
 import { supabase } from '../../services/supabase';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Card, Form, Input, Button, Typography, Alert, Select, Checkbox, Space } from 'antd';
 import { useAuth } from '../../context/AuthContext';
 import axiosClient from '../../api/axiosClient';
+import {
+  authReturnState,
+  safeAuthReturnLocation,
+} from '../../utils/authReturnLocation';
 
 const { Title, Text } = Typography;
 
 const RegisterCustomerPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { signIn } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [email, setEmail] = useState('');
   const [cooldown, setCooldown] = useState(0);
 
   const resendVerification = async () => {
     if (!supabase || !email || cooldown > 0) return;
-    const { error: err } = await supabase.auth.resend({ type: 'signup', email });
+    const { error: err } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/auth/verify-email` },
+    });
     if (err) { setError(err.message); return; }
     setCooldown(60);
     const timer = setInterval(() => {
@@ -42,37 +50,66 @@ const RegisterCustomerPage: React.FC = () => {
         mobile: values.mobile,
       });
       const { error: loginErr } = await signIn(values.email, values.password);
-      if (loginErr) { setError(loginErr); setLoading(false); return; }
+      if (loginErr) {
+        setError(
+          /email not confirmed|email confirmation/i.test(loginErr)
+            ? 'Your account requires email verification before you can continue.'
+            : loginErr
+        );
+        setLoading(false);
+        return;
+      }
+      if (!supabase) throw new Error('Supabase is not configured.');
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Unable to verify the newly created account.');
+      if (!authData.user.email_confirmed_at) {
+        setEmail(values.email);
+        setError('Your account requires email verification before you can continue.');
+        setLoading(false);
+        return;
+      }
+
+      const profileRole = authData.user.user_metadata?.role;
+      if (profileRole !== 'customer') {
+        throw new Error('The newly created account is not a customer account.');
+      }
+
+      const returnLocation = safeAuthReturnLocation(location.state);
+      navigate(
+        returnLocation
+          ? `${returnLocation.pathname}${returnLocation.search}${returnLocation.hash}`
+          : '/customer/dashboard',
+        { replace: true }
+      );
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Registration failed.');
       setLoading(false);
       return;
     }
-    setSuccess(true);
   };
-
-  if (success) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F5F7FA', padding: 24 }}>
-        <Card style={{ width: 460 }}>
-          <Title level={4}>Verify your email</Title>
-          <Text>We sent a verification link to your email. Please verify before signing in.</Text>
-          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button type="primary" onClick={() => navigate('/auth/login')}>Go to login</Button>
-            <Button disabled={cooldown > 0} onClick={resendVerification}>
-              {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend verification email'}
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F5F7FA', padding: 24 }}>
       <Card style={{ width: 520 }}>
         <Title level={3} style={{ color: '#172B4D' }}>Customer Registration</Title>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        {error && (
+          <Alert
+            type="error"
+            title={error}
+            style={{ marginBottom: 16 }}
+            action={
+              error.includes('email verification') ? (
+                <Button
+                  disabled={cooldown > 0}
+                  onClick={() => void resendVerification()}
+                >
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend verification email'}
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="fullName" label="Full name" rules={[{ required: true }]}>
             <Input />
@@ -118,7 +155,21 @@ const RegisterCustomerPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
-        <Text>Already have an account? <Link to="/auth/login">Sign in</Link></Text>
+        <Text>
+          Already have an account?{' '}
+          <Link
+            to="/auth/login?role=customer"
+            state={authReturnState(
+              safeAuthReturnLocation(location.state) || {
+                pathname: '/customer/dashboard',
+                search: '',
+                hash: '',
+              }
+            )}
+          >
+            Sign in
+          </Link>
+        </Text>
       </Card>
     </div>
   );

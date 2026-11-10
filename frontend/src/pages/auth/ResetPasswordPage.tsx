@@ -30,7 +30,7 @@ const ResetPasswordPage: React.FC = () => {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F5F7FA', padding: 24 }}>
       <Card style={{ width: 420 }}>
         <Title level={3} style={{ color: '#172B4D' }}>Reset password</Title>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="password" label="New password" rules={[{ required: true, min: 8 }]}>
             <Input.Password />

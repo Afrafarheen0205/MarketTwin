@@ -12,6 +12,7 @@ import {
   Modal,
   Descriptions,
   message,
+  Alert,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -47,7 +48,7 @@ export const OfferManagement: React.FC = () => {
     setSyncing(true);
     setTimeout(() => {
       setSyncing(false);
-      message.success('Merchant bids and buyer approval statuses updated.');
+      message.info('Demo only. No offers were fetched or changed.');
     }, 600);
   };
 
@@ -209,6 +210,7 @@ export const OfferManagement: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 24 }}>
+      <Alert type="warning" showIcon title="Demo layout - not live offer management" description="Metrics and controls below are illustrative. No audit, export, validation, or database changes are performed." />
       {/* 1. Header (Overview + Sync / Help / Time Filter) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -526,7 +528,7 @@ export const OfferManagement: React.FC = () => {
               <span>Verify All Price Bounds</span>
             </button>
             <button
-              onClick={() => message.success('Pricing matrix exported to CSV.')}
+              onClick={() => message.info('Demo only. No export was generated.')}
               style={{
                 backgroundColor: '#FFFFFF',
                 color: '#334155',
@@ -778,7 +780,7 @@ export const OfferManagement: React.FC = () => {
           <button
             key="approve"
             onClick={() => {
-              message.success(`Offer ${viewingOffer?.offerCode} validated and certified for customer approval.`);
+              message.info('Demo only. No offer was validated or certified.');
               setViewingOffer(null);
             }}
             style={{

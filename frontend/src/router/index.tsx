@@ -23,6 +23,7 @@ import ProductCatalogue from '../pages/customer/ProductCatalogue';
 import ProductSearch from '../pages/customer/ProductSearch';
 import ProductDetails from '../pages/customer/ProductDetails';
 import CreateDemand from '../pages/customer/CreateDemand';
+import DemandAnalysis from '../pages/customer/DemandAnalysis';
 import MyDemands from '../pages/customer/MyDemands';
 import DemandGroups from '../pages/customer/DemandGroups';
 import MerchantOffers from '../pages/customer/MerchantOffers';
@@ -31,6 +32,12 @@ import Orders from '../pages/customer/Orders';
 import OrderTracking from '../pages/customer/OrderTracking';
 import NotificationsPage from '../pages/customer/NotificationsPage';
 import CustomerProfile from '../pages/customer/CustomerProfile';
+import {
+  CheckoutPage,
+  PaymentCancelledPage,
+  PaymentFailurePage,
+  PaymentSuccessPage,
+} from '../pages/customer/PayPalCheckoutPages';
 
 // Merchant Module
 import MerchantDashboard from '../pages/merchant/MerchantDashboard';
@@ -43,6 +50,7 @@ import MerchantProfile from '../pages/merchant/MerchantProfile';
 
 // Admin Module
 import AdminDashboard from '../pages/admin/AdminDashboard';
+import AdminProfile from '../pages/admin/AdminProfile';
 import CustomerManagement from '../pages/admin/CustomerManagement';
 import MerchantManagement from '../pages/admin/MerchantManagement';
 import ProductManagement from '../pages/admin/ProductManagement';
@@ -69,6 +77,7 @@ export const router = createBrowserRouter([
       { path: 'customer/products/:id', element: C(<ProductDetails />, ['customer']) },
       { path: 'customer/demands', element: C(<MyDemands />, ['customer']) },
       { path: 'customer/demands/create', element: C(<CreateDemand />, ['customer']) },
+      { path: 'customer/demands/:demandId/analysis', element: C(<DemandAnalysis />, ['customer']) },
       { path: 'customer/groups', element: C(<DemandGroups />, ['customer']) },
       { path: 'customer/offers', element: C(<MerchantOffers />, ['customer']) },
       { path: 'customer/compare', element: C(<OfferComparison />, ['customer']) },
@@ -76,6 +85,10 @@ export const router = createBrowserRouter([
       { path: 'customer/orders/:id/track', element: C(<OrderTracking />, ['customer']) },
       { path: 'customer/notifications', element: C(<NotificationsPage />, ['customer']) },
       { path: 'customer/profile', element: C(<CustomerProfile />, ['customer']) },
+      { path: 'customer/checkout', element: C(<CheckoutPage />, ['customer']) },
+      { path: 'customer/payment/success', element: C(<PaymentSuccessPage />, ['customer']) },
+      { path: 'customer/payment/cancelled', element: C(<PaymentCancelledPage />, ['customer']) },
+      { path: 'customer/payment/failure', element: C(<PaymentFailurePage />, ['customer']) },
 
       { path: 'merchant', element: <Navigate to="/merchant/dashboard" replace /> },
       { path: 'merchant/dashboard', element: C(<MerchantDashboard />, ['merchant']) },
@@ -89,6 +102,7 @@ export const router = createBrowserRouter([
 
       { path: 'admin', element: <Navigate to="/admin/dashboard" replace /> },
       { path: 'admin/dashboard', element: C(<AdminDashboard />, ['admin']) },
+      { path: 'admin/profile', element: C(<AdminProfile />, ['admin']) },
       { path: 'admin/customers', element: C(<CustomerManagement />, ['admin']) },
       { path: 'admin/merchants', element: C(<MerchantManagement />, ['admin']) },
       { path: 'admin/products', element: C(<ProductManagement />, ['admin']) },

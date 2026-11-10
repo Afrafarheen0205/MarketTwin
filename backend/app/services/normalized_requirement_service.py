@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.core.supabase import get_supabase_client
@@ -9,8 +10,6 @@ def extract_and_save(demand_id: str, demand: Dict[str, Any], version: str = "v1"
     if client is None:
         raise RuntimeError("Supabase is not configured.")
     extracted = extract_requirements(demand)
-    # Check existing
-    existing = client.table("demand_normalized_requirements").select("id").eq("demand_id", demand_id).eq("extraction_version", version).execute()
     payload = {
         "demand_id": demand_id,
         "extraction_version": version,
@@ -29,11 +28,12 @@ def extract_and_save(demand_id: str, demand: Dict[str, Any], version: str = "v1"
         "validation_errors": extracted.get("validation_errors", []),
         "confidence_score": extracted.get("confidence_score"),
         "status": extracted.get("status", "Pending"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    if existing.data:
-        result = client.table("demand_normalized_requirements").update(payload).eq("id", existing.data[0]["id"]).execute()
-    else:
-        result = client.table("demand_normalized_requirements").insert(payload).execute()
+    result = client.table("demand_normalized_requirements").upsert(
+        payload,
+        on_conflict="demand_id,extraction_version",
+    ).execute()
     if not result.data:
         raise RuntimeError("Failed to save normalized requirements.")
     return result.data[0]
@@ -52,9 +52,9 @@ def review_normalized(requirement_id: str, reviewer_id: str, updates: Dict[str, 
     if client is None:
         raise RuntimeError("Supabase is not configured.")
     updates["reviewed_by"] = reviewer_id
-    from datetime import datetime, timezone
     updates["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     updates["status"] = updates.get("status", "Manually Reviewed")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = client.table("demand_normalized_requirements").update(updates).eq("id", requirement_id).execute()
     if not result.data:
         raise RuntimeError("Review update failed.")

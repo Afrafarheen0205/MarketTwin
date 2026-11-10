@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Layout,
@@ -48,8 +48,10 @@ import {
 } from '@ant-design/icons';
 import healthApi from '../../api/healthApi';
 import { HealthResponse } from '../../types';
-import { useAuth } from '../../context/AuthContext';
+import { profileInitials, useAuth } from '../../context/AuthContext';
 import { env, isSupabaseConfigured } from '../../config/env';
+import RoleSelectionModal from '../common/RoleSelectionModal';
+import type { AuthAction } from '../common/RoleSelectionModal';
 // mock data removed; notifications are loaded from Supabase when available
 
 const { Header, Sider, Content, Footer } = Layout;
@@ -61,16 +63,55 @@ export const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { user, role: authRole, signOut } = useAuth();
+  const { user, profile, role: authRole, signOut } = useAuth();
   const currentPath = location.pathname;
   const isHomePage = currentPath === '/';
-  const activeRole: ActiveRole = authRole === 'merchant' ? 'merchant' : authRole === 'admin' ? 'admin' : 'customer';
+  const activeRole: ActiveRole | null = authRole;
+  const profileName = profile?.fullName?.trim() || 'Name unavailable';
+  const profileEmail = profile?.email || 'Email unavailable';
 
   const [collapsed, setCollapsed] = useState(false);
   const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [pinging, setPinging] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [authAction, setAuthAction] = useState<AuthAction | null>(null);
+  const [roleSelectionOpen, setRoleSelectionOpen] = useState(false);
+  const roleNavigationStarted = useRef(false);
+
+  const openRoleSelection = (action: AuthAction) => {
+    roleNavigationStarted.current = false;
+    setAuthAction(action);
+    setRoleSelectionOpen(true);
+  };
+
+  const closeRoleSelection = () => {
+    setRoleSelectionOpen(false);
+    setAuthAction(null);
+  };
+
+  const navigateForRole = (selectedRole: ActiveRole) => {
+    if (roleNavigationStarted.current || !authAction) return;
+    if (authAction === 'register' && selectedRole === 'admin') return;
+
+    roleNavigationStarted.current = true;
+    const destination = authAction === 'login'
+      ? `/auth/login?role=${selectedRole}`
+      : `/auth/register/${selectedRole}`;
+    closeRoleSelection();
+    navigate(destination);
+  };
+
+  const handleLogout = async () => {
+    // Move off any protected route first; defer signOut to a macrotask so the
+    // navigation commits before the session is cleared, otherwise the
+    // protected-route guard redirects to /login instead of home.
+    navigate('/', { replace: true });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await signOut();
+  };
 
   // Backend Health Polling
   const checkHealth = async () => {
@@ -98,7 +139,7 @@ export const AppLayout: React.FC = () => {
     {
       key: '/customer/dashboard',
       icon: <DashboardOutlined />,
-      label: 'Home Dashboard',
+      label: 'Home',
     },
     {
       key: 'catalogue-group',
@@ -296,9 +337,9 @@ export const AppLayout: React.FC = () => {
       key: 'profile-view',
       label: (
         <div>
-          <div style={{ fontWeight: 600, color: '#172B4D' }}>Alex Mercer</div>
-          <div style={{ fontSize: 12, color: '#6B778C' }}>alex.mercer@techstart.io</div>
-          <Tag color="blue" style={{ marginTop: 4 }}>Role: {activeRole.toUpperCase()}</Tag>
+          <div style={{ fontWeight: 600, color: '#172B4D' }}>{profileName}</div>
+          <div style={{ fontSize: 12, color: '#6B778C' }}>{profileEmail}</div>
+          <Tag color="blue" style={{ marginTop: 4 }}>Role: {activeRole?.toUpperCase() ?? 'UNVERIFIED'}</Tag>
         </div>
       ),
     },
@@ -314,17 +355,14 @@ export const AppLayout: React.FC = () => {
       key: 'logout',
       icon: <CloseCircleOutlined />,
       label: 'Logout',
-      onClick: async () => {
-        await signOut();
-        navigate('/login', { replace: true });
-      },
+      onClick: handleLogout,
     },
   ];
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#F5F7FA' }}>
       {/* Sider Navigation */}
-      {user && !isHomePage && (
+      {user && activeRole && !isHomePage && (
       <Sider
         collapsible
         collapsed={collapsed}
@@ -497,7 +535,7 @@ export const AppLayout: React.FC = () => {
                 <span>Notifications</span>
               </div>
               <div
-                onClick={() => navigate('/')}
+                onClick={handleLogout}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -529,7 +567,7 @@ export const AppLayout: React.FC = () => {
           style={{
             background: '#FFFFFF',
             borderBottom: '1px solid #E2E8F0',
-            padding: '0 32px',
+            padding: isHomePage ? '0 24px' : '0 32px',
             height: 72,
             display: 'flex',
             alignItems: 'center',
@@ -539,44 +577,37 @@ export const AppLayout: React.FC = () => {
             zIndex: 90,
           }}
         >
-          {/* Left: Brand Logo on Home / Landing Page OR Sidebar Collapse Toggle on Internal Pages */}
+          {/* Left: Home brand or Sidebar Collapse Toggle on Internal Pages */}
           <Space orientation="horizontal" size={16} align="center">
             {isHomePage ? (
               <div
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  cursor: 'pointer',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  maxWidth: '52vw',
                 }}
-                onClick={() => navigate('/')}
               >
-                <div
+                <span
                   style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 12,
-                    background: 'linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#FFFFFF',
+                    color: '#0F172A',
+                    fontSize: 19,
                     fontWeight: 800,
-                    fontSize: 17,
-                    boxShadow: '0 2px 10px rgba(79, 70, 229, 0.35)',
-                    flexShrink: 0,
+                    lineHeight: 1.15,
                   }}
                 >
-                  MT
-                </div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 18, color: '#0F172A', lineHeight: 1.2 }}>
-                    Market<span style={{ color: '#4F46E5' }}>Twin</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, letterSpacing: 0.5 }}>
-                    DEMAND-DRIVEN B2B
-                  </div>
-                </div>
+                  MarketTwin
+                </span>
+                <span
+                  style={{
+                    color: '#64748B',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  AI-Powered Product Discovery for Businesses
+                </span>
               </div>
             ) : (
               user && (
@@ -590,40 +621,41 @@ export const AppLayout: React.FC = () => {
             )}
           </Space>
 
-          {/* Center: Global Search Input matching reference */}
-          <div style={{ flex: '0 1 460px', margin: '0 20px' }} className="hidden md:block">
-            <Input
-              placeholder="Search across the app..."
-              prefix={<SearchOutlined style={{ color: '#94A3B8', marginRight: 8, fontSize: 15 }} />}
-              suffix={
-                <span
-                  style={{
-                    fontSize: 11.5,
-                    backgroundColor: '#F1F5F9',
-                    color: '#64748B',
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #E2E8F0',
-                    fontWeight: 600,
-                  }}
-                >
-                  ⌘/
-                </span>
-              }
-              style={{
-                borderRadius: 24,
-                backgroundColor: '#F8FAFC',
-                border: '1px solid #E2E8F0',
-                height: 42,
-                fontSize: 14,
-                padding: '0 16px',
-              }}
-            />
-          </div>
+          {!isHomePage && (
+            <div style={{ flex: '0 1 460px', margin: '0 20px' }} className="hidden md:block">
+              <Input
+                placeholder="Search across the app..."
+                prefix={<SearchOutlined style={{ color: '#94A3B8', marginRight: 8, fontSize: 15 }} />}
+                suffix={
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      backgroundColor: '#F1F5F9',
+                      color: '#64748B',
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #E2E8F0',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⌘/
+                  </span>
+                }
+                style={{
+                  borderRadius: 24,
+                  backgroundColor: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  height: 42,
+                  fontSize: 14,
+                  padding: '0 16px',
+                }}
+              />
+            </div>
+          )}
 
           {/* Right: Switch Role + Backend Indicator + Bell + User Icon + Avatar + Account ▾ */}
           <Space orientation="horizontal" size={14} align="center">
-            {user ? (
+            {user && profile && activeRole ? (
               <>
                 <Tag
                   color={activeRole === 'customer' ? 'blue' : activeRole === 'merchant' ? 'orange' : 'purple'}
@@ -648,8 +680,13 @@ export const AppLayout: React.FC = () => {
                 />
 
                 {/* User Avatar Circle */}
-                <Avatar style={{ backgroundColor: '#4F46E5', verticalAlign: 'middle', fontWeight: 600 }} size={38}>
-                  {user.email?.slice(0, 2).toUpperCase() ?? 'U'}
+                <Avatar
+                  src={profile.avatarUrl || undefined}
+                  alt={profileName}
+                  style={{ backgroundColor: '#4F46E5', verticalAlign: 'middle', fontWeight: 600 }}
+                  size={38}
+                >
+                  {profileInitials(profile.fullName, profile.email)}
                 </Avatar>
 
                 {/* Account ▾ Dropdown Pill */}
@@ -677,12 +714,19 @@ export const AppLayout: React.FC = () => {
               </>
             ) : (
               <>
-                <Button type="text" onClick={() => navigate('/login')} style={{ fontSize: 14, fontWeight: 600 }}>Login</Button>
-                <Button type="primary" onClick={() => navigate('/register/customer')} style={{ fontSize: 14, fontWeight: 600, height: 40, borderRadius: 20, padding: '0 20px' }}>Register</Button>
+                <Button type="text" onClick={() => openRoleSelection('login')} style={{ fontSize: 14, fontWeight: 600 }}>Login</Button>
+                <Button type="primary" onClick={() => openRoleSelection('register')} style={{ fontSize: 14, fontWeight: 600, height: 40, borderRadius: 20, padding: '0 20px' }}>Register</Button>
               </>
             )}
           </Space>
         </Header>
+
+        <RoleSelectionModal
+          open={roleSelectionOpen}
+          action={authAction}
+          onClose={closeRoleSelection}
+          onSelectRole={navigateForRole}
+        />
 
         {/* Page Content Body */}
         <Content
@@ -692,7 +736,7 @@ export const AppLayout: React.FC = () => {
             background: 'transparent',
           }}
         >
-          <Outlet context={{ isBackendHealthy, healthData, checkHealth }} />
+          <Outlet key={user?.id ?? 'anonymous'} context={{ isBackendHealthy, healthData, checkHealth }} />
         </Content>
 
         {/* Light Footer */}
