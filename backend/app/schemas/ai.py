@@ -15,6 +15,12 @@ _PROVIDER_PRICE_FIELDS = (
     "budget",
     "derived_max_unit_budget",
 )
+_MAXIMUM_UNIT_PRICE_REQUIREMENT_KEYS = {
+    "max_budget_unit_price",
+    "maximum_budget_unit_price",
+    "max_unit_price",
+    "maximum_unit_price",
+}
 _PRICE_AMOUNT_PATTERN = re.compile(
     r"^\s*(?:(?P<prefix>maximum(?:\s+budget)?|minimum(?:\s+budget)?|"
     r"max(?:imum)?|min(?:imum)?|up\s+to|at\s+most|at\s+least|"
@@ -181,6 +187,30 @@ class RequirementDraft(BaseModel):
         commercial = normalized.get("commercial_constraints")
         if isinstance(commercial, dict):
             commercial = dict(commercial)
+            mandatory = normalized.get("mandatory_requirements")
+            if isinstance(mandatory, dict):
+                mandatory = dict(mandatory)
+                maximum_price_keys = [
+                    key
+                    for key in mandatory
+                    if re.sub(r"[^a-z0-9]+", "_", str(key).casefold()).strip("_")
+                    in _MAXIMUM_UNIT_PRICE_REQUIREMENT_KEYS
+                ]
+                if maximum_price_keys:
+                    if not any(
+                        key in commercial
+                        for key in (
+                            "max_target_unit_price",
+                            "maximum_target_unit_price",
+                        )
+                    ):
+                        commercial["maximum_target_unit_price"] = mandatory[
+                            maximum_price_keys[0]
+                        ]
+                    for key in maximum_price_keys:
+                        mandatory.pop(key)
+                    normalized["mandatory_requirements"] = mandatory
+
             explicit_currencies = set()
             for field in _PROVIDER_PRICE_FIELDS:
                 if field not in commercial:

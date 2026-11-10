@@ -33,6 +33,7 @@ import {
   loadReviewedDemandDraft,
   type ReviewedDemandDraft,
 } from '../../utils/reviewedDemandDraft';
+import { createSecureUuid } from '../../utils/secureUuid';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -363,7 +364,7 @@ export const CreateDemand: React.FC = () => {
             submissionId.current = null;
           }
           if (!submissionId.current) {
-            submissionId.current = crypto.randomUUID();
+            submissionId.current = createSecureUuid();
             try {
               sessionStorage.setItem(SUBMISSION_ID_KEY, submissionId.current);
             } catch {

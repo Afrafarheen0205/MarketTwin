@@ -32,6 +32,12 @@ import Orders from '../pages/customer/Orders';
 import OrderTracking from '../pages/customer/OrderTracking';
 import NotificationsPage from '../pages/customer/NotificationsPage';
 import CustomerProfile from '../pages/customer/CustomerProfile';
+import {
+  CheckoutPage,
+  PaymentCancelledPage,
+  PaymentFailurePage,
+  PaymentSuccessPage,
+} from '../pages/customer/PayPalCheckoutPages';
 
 // Merchant Module
 import MerchantDashboard from '../pages/merchant/MerchantDashboard';
@@ -79,6 +85,10 @@ export const router = createBrowserRouter([
       { path: 'customer/orders/:id/track', element: C(<OrderTracking />, ['customer']) },
       { path: 'customer/notifications', element: C(<NotificationsPage />, ['customer']) },
       { path: 'customer/profile', element: C(<CustomerProfile />, ['customer']) },
+      { path: 'customer/checkout', element: C(<CheckoutPage />, ['customer']) },
+      { path: 'customer/payment/success', element: C(<PaymentSuccessPage />, ['customer']) },
+      { path: 'customer/payment/cancelled', element: C(<PaymentCancelledPage />, ['customer']) },
+      { path: 'customer/payment/failure', element: C(<PaymentFailurePage />, ['customer']) },
 
       { path: 'merchant', element: <Navigate to="/merchant/dashboard" replace /> },
       { path: 'merchant/dashboard', element: C(<MerchantDashboard />, ['merchant']) },

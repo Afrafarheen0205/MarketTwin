@@ -87,8 +87,11 @@ axiosClient.interceptors.response.use(
         friendlyMessage = `Server error (${error.response.status}).`;
       }
     } else if (error.request) {
-      // Network error or backend server is not running
-      friendlyMessage = `Cannot reach backend at ${env.apiBaseUrl}. Ensure the FastAPI server is running.`;
+      const apiLocation = env.apiBaseUrl || 'the current frontend origin';
+      friendlyMessage =
+        `Unable to complete the API request via ${apiLocation}. ` +
+        'Check network connectivity, the frontend API proxy, and backend CORS settings; ' +
+        'a running backend may still be unreachable from this browser.';
     }
 
     const enhancedError = new Error(friendlyMessage);

@@ -94,6 +94,7 @@ const clearUserScopedDrafts = (userId: string | null = null): void => {
     sessionStorage.removeItem('markettwin_ai_requirement_conversation_v1');
     sessionStorage.removeItem('markettwin_reviewed_demand_draft_v1');
     sessionStorage.removeItem('markettwin_demand_submission_id_v1');
+    sessionStorage.removeItem('markettwin_paypal_checkout_context_v1');
     if (userId) localStorage.removeItem(`markettwin_recent_views_${userId}`);
   } catch (error) {
     console.warn('Unable to clear user-specific browser data.', error);

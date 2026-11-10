@@ -14,6 +14,29 @@ def test_list_orders_requires_auth():
     assert response.status_code == 401
 
 
+def test_catalogue_checkout_endpoints_require_auth():
+    client = TestClient(app)
+    payload = {
+        "product_id": "catalogue-1",
+        "quantity": 1,
+        "requirements": {
+            "product_name": "test",
+            "product_type": None,
+            "category": None,
+            "mandatory_requirements": {},
+            "optional_preferences": {},
+            "commercial_constraints": {},
+            "delivery_constraints": {},
+        },
+    }
+
+    assert client.post("/api/v1/customer/orders/quote", json=payload).status_code == 401
+    assert client.post(
+        "/api/v1/customer/orders/checkout",
+        json={**payload, "idempotency_key": "11111111-1111-4111-8111-111111111111"},
+    ).status_code == 401
+
+
 def test_order_lookup_uses_atomic_snapshot_not_current_offer(monkeypatch):
     from types import SimpleNamespace
     from app.services import order_service

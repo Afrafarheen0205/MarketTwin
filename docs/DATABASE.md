@@ -11,7 +11,7 @@ PROJECT_NAME="MarketTwin API"
 ENVIRONMENT="development"
 DEBUG=True
 API_V1_STR="/api/v1"
-ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,http://10.107.161.106:5173"
 SUPABASE_URL="https://<project-ref>.supabase.co"
 SUPABASE_KEY="<anon-public-key>"
 SUPABASE_SERVICE_ROLE_KEY="<service-role-secret-key>"
@@ -19,7 +19,8 @@ SUPABASE_SERVICE_ROLE_KEY="<service-role-secret-key>"
 
 ### Frontend (`frontend/.env`)
 ```
-VITE_API_BASE_URL=http://localhost:8000
+# Leave empty in development to use the Vite /api proxy.
+VITE_API_BASE_URL=
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon-public-key>
 ```

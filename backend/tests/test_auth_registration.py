@@ -6,7 +6,7 @@ from app.api.v1.endpoints import auth
 from app.main import app
 
 
-def test_customer_registration_creates_unverified_user(monkeypatch):
+def test_customer_registration_creates_email_confirmed_user(monkeypatch):
     observed = {}
 
     def create_user(payload):
@@ -28,5 +28,33 @@ def test_customer_registration_creates_unverified_user(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert observed["email_confirm"] is False
+    assert observed["email_confirm"] is True
     assert observed["user_metadata"]["role"] == "customer"
+
+
+def test_merchant_registration_creates_email_confirmed_user(monkeypatch):
+    observed = {}
+
+    def create_user(payload):
+        observed.update(payload)
+        return SimpleNamespace(user=SimpleNamespace(id="merchant-1"))
+
+    client = SimpleNamespace(
+        auth=SimpleNamespace(admin=SimpleNamespace(create_user=create_user))
+    )
+    monkeypatch.setattr(auth, "get_supabase_client", lambda: client)
+
+    response = TestClient(app).post(
+        "/api/v1/auth/register/merchant",
+        json={
+            "email": "merchant@example.test",
+            "password": "secure-password",
+            "business_name": "Test Business",
+            "owner_name": "Test Merchant",
+            "categories": ["Electronics"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert observed["email_confirm"] is True
+    assert observed["user_metadata"]["role"] == "merchant"

@@ -46,7 +46,7 @@ def _create_user(email: str, password: str, metadata: dict) -> str:
             {
                 "email": email,
                 "password": password,
-                "email_confirm": False,
+                "email_confirm": True,
                 "user_metadata": metadata,
             }
         )

@@ -36,7 +36,9 @@ class Settings(BaseSettings):
         return bool(v)
 
     # CORS
-    ALLOWED_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173"
+    ALLOWED_ORIGINS: Union[str, List[str]] = (
+        "http://localhost:5173,http://127.0.0.1:5173,http://10.107.161.106:5173"
+    )
 
     # Supabase Configuration
     SUPABASE_URL: str = Field(default="", description="Supabase project URL")

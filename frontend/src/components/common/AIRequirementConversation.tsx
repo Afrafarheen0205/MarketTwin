@@ -17,6 +17,7 @@ import {
   DeleteOutlined,
   RobotOutlined,
   SendOutlined,
+  ShoppingCartOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import {
@@ -28,10 +29,12 @@ import {
   matchProductsToRequirements,
   sendAIConversationMessage,
 } from '../../api/aiApi';
+import { saveCheckoutContext } from '../../api/paymentApi';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
 import { authReturnState } from '../../utils/authReturnLocation';
 import { saveReviewedDemandDraft } from '../../utils/reviewedDemandDraft';
+import { createSecureUuid } from '../../utils/secureUuid';
 import './AIRequirementConversation.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -202,7 +205,8 @@ const formatSpecification = (value: unknown): string => {
 const ProductResultCard: React.FC<{
   product: MatchedProduct;
   exact: boolean;
-}> = ({ product, exact }) => {
+  onPurchase?: () => void;
+}> = ({ product, exact, onPurchase }) => {
   const [imageIndex, setImageIndex] = useState(0);
   const imageUrls = product.images
     .map((image) => image.trim())
@@ -281,6 +285,11 @@ const ProductResultCard: React.FC<{
           <Paragraph className="ai-product-description">
             {product.description || 'No catalogue description provided.'}
           </Paragraph>
+          {onPurchase && (
+            <Button type="primary" icon={<ShoppingCartOutlined />} onClick={onPurchase}>
+              Purchase
+            </Button>
+          )}
         </div>
       </div>
     </Card>
@@ -292,7 +301,8 @@ const ProductMatchingResults: React.FC<{
   onEdit: () => void;
   onCreateDemand: () => void;
   creatingDemand: boolean;
-}> = ({ result, onEdit, onCreateDemand, creatingDemand }) => {
+  onPurchase: (product: MatchedProduct) => void;
+}> = ({ result, onEdit, onCreateDemand, creatingDemand, onPurchase }) => {
   const comparisonProducts = [...result.products, ...result.near_matches].slice(0, 3);
   const specificationKeys = Array.from(
     new Set(comparisonProducts.flatMap((product) => Object.keys(product.specifications)))
@@ -347,7 +357,19 @@ const ProductMatchingResults: React.FC<{
         <>
           <Title level={4}>Exact Matches ({result.exact_match_count})</Title>
           {result.products.map((product) => (
-            <ProductResultCard key={product.product_id} product={product} exact />
+            <ProductResultCard
+              key={product.product_id}
+              product={product}
+              exact
+              onPurchase={
+                product.mandatory_results.every((item) => item.state === 'PASS') &&
+                product.effective_price !== null &&
+                /^[A-Z]{3}$/.test(product.currency || '') &&
+                (product.stock === null || product.stock > 0)
+                  ? () => onPurchase(product)
+                  : undefined
+              }
+            />
           ))}
         </>
       )}
@@ -1070,6 +1092,23 @@ export const AIRequirementConversation: React.FC = () => {
                 onEdit={editRequirements}
                 onCreateDemand={() => void startDemandCreation()}
                 creatingDemand={creatingDemand}
+                onPurchase={(product) => {
+                  if (!requirementDraft) return;
+                  try {
+                    saveCheckoutContext({
+                      productId: product.product_id,
+                      requirements: requirementDraft,
+                      idempotencyKey: createSecureUuid(),
+                    });
+                    navigate(`/customer/checkout?product_id=${encodeURIComponent(product.product_id)}`);
+                  } catch (requestError) {
+                    setCreateDemandError(
+                      requestError instanceof Error
+                        ? requestError.message
+                        : 'Unable to securely prepare checkout. Please try again in a supported browser.'
+                    );
+                  }
+                }}
               />
             </>
           )}
