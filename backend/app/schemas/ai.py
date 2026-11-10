@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Literal, Optional
 from decimal import Decimal, InvalidOperation
@@ -15,11 +16,24 @@ _PROVIDER_PRICE_FIELDS = (
     "budget",
     "derived_max_unit_budget",
 )
-_MAXIMUM_UNIT_PRICE_REQUIREMENT_KEYS = {
-    "max_budget_unit_price",
-    "maximum_budget_unit_price",
-    "max_unit_price",
-    "maximum_unit_price",
+_COMMERCIAL_REQUIREMENT_KEYS = {
+    "price_type": "price_type",
+    "maximum_unit_price": "maximum_target_unit_price",
+    "max_unit_price": "maximum_target_unit_price",
+    "max_budget_unit_price": "maximum_target_unit_price",
+    "maximum_budget_unit_price": "maximum_target_unit_price",
+    "minimum_unit_price": "minimum_target_unit_price",
+    "min_unit_price": "minimum_target_unit_price",
+    "minimum_budget_unit_price": "minimum_target_unit_price",
+    "min_budget_unit_price": "minimum_target_unit_price",
+    "budget": "budget",
+    "maximum_budget": "maximum_target_unit_price",
+    "minimum_budget": "minimum_target_unit_price",
+    "target_unit_price": "target_unit_price",
+    "total_budget": "total_budget",
+    "quantity": "quantity",
+    "unit": "unit",
+    "currency": "currency",
 }
 _PRICE_AMOUNT_PATTERN = re.compile(
     r"^\s*(?:(?P<prefix>maximum(?:\s+budget)?|minimum(?:\s+budget)?|"
@@ -91,6 +105,79 @@ def _normalize_price_amount(value: Any) -> tuple[Any, Optional[str]]:
         if re.fullmatch(r"[a-z]{3}", token):
             currency = token.upper()
     return format(amount.normalize(), "f"), currency
+
+
+def normalize_commercial_requirement_fields(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(value)
+    commercial_value = normalized.get("commercial_constraints")
+    commercial = dict(commercial_value) if isinstance(commercial_value, dict) else {}
+
+    for requirement_field in ("mandatory_requirements", "optional_preferences"):
+        requirements_value = normalized.get(requirement_field)
+        if not isinstance(requirements_value, dict):
+            continue
+        requirements = dict(requirements_value)
+        for key, raw_value in list(requirements.items()):
+            normalized_key = re.sub(
+                r"[^a-z0-9]+", "_", str(key).casefold()
+            ).strip("_")
+            if normalized_key != "price_type":
+                continue
+            commercial.setdefault("price_type", str(raw_value).strip().casefold())
+            requirements.pop(key)
+        normalized[requirement_field] = requirements
+
+    for requirement_field in ("mandatory_requirements", "optional_preferences"):
+        requirements_value = normalized.get(requirement_field)
+        if not isinstance(requirements_value, dict):
+            continue
+        requirements = dict(requirements_value)
+        for key, raw_value in list(requirements.items()):
+            normalized_key = re.sub(
+                r"[^a-z0-9]+", "_", str(key).casefold()
+            ).strip("_")
+            commercial_key = _COMMERCIAL_REQUIREMENT_KEYS.get(normalized_key)
+            if commercial_key is None:
+                continue
+            if commercial_key == "budget":
+                price_type = str(commercial.get("price_type", "")).casefold()
+                if price_type == "maximum":
+                    commercial_key = "maximum_target_unit_price"
+                elif price_type == "minimum":
+                    commercial_key = "minimum_target_unit_price"
+
+            if commercial_key in {
+                "maximum_target_unit_price",
+                "minimum_target_unit_price",
+                "target_unit_price",
+                "total_budget",
+                "budget",
+                "maximum_budget",
+                "minimum_budget",
+            }:
+                amount_value = raw_value
+                if isinstance(raw_value, dict):
+                    amount_value = raw_value.get("value")
+                    currency = raw_value.get("currency")
+                    if (
+                        isinstance(currency, str)
+                        and currency.strip()
+                        and not commercial.get("currency")
+                    ):
+                        commercial["currency"] = currency.strip().upper()
+                    if amount_value is None:
+                        amount_value = json.dumps(raw_value, sort_keys=True)
+                amount, parsed_currency = _normalize_price_amount(amount_value)
+                commercial.setdefault(commercial_key, amount)
+                if parsed_currency and not commercial.get("currency"):
+                    commercial["currency"] = parsed_currency
+            else:
+                commercial.setdefault(commercial_key, str(raw_value).strip())
+            requirements.pop(key)
+        normalized[requirement_field] = requirements
+
+    normalized["commercial_constraints"] = commercial
+    return normalized
 
 
 class ConversationMessage(BaseModel):
@@ -184,33 +271,10 @@ class RequirementDraft(BaseModel):
                 cleaned[key] = item
             normalized[field] = cleaned
 
+        normalized = normalize_commercial_requirement_fields(normalized)
         commercial = normalized.get("commercial_constraints")
         if isinstance(commercial, dict):
             commercial = dict(commercial)
-            mandatory = normalized.get("mandatory_requirements")
-            if isinstance(mandatory, dict):
-                mandatory = dict(mandatory)
-                maximum_price_keys = [
-                    key
-                    for key in mandatory
-                    if re.sub(r"[^a-z0-9]+", "_", str(key).casefold()).strip("_")
-                    in _MAXIMUM_UNIT_PRICE_REQUIREMENT_KEYS
-                ]
-                if maximum_price_keys:
-                    if not any(
-                        key in commercial
-                        for key in (
-                            "max_target_unit_price",
-                            "maximum_target_unit_price",
-                        )
-                    ):
-                        commercial["maximum_target_unit_price"] = mandatory[
-                            maximum_price_keys[0]
-                        ]
-                    for key in maximum_price_keys:
-                        mandatory.pop(key)
-                    normalized["mandatory_requirements"] = mandatory
-
             explicit_currencies = set()
             for field in _PROVIDER_PRICE_FIELDS:
                 if field not in commercial:

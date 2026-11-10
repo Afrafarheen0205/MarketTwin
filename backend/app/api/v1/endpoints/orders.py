@@ -1,4 +1,5 @@
 import logging
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -133,18 +134,48 @@ async def quote_catalogue_checkout(
     payload: CatalogueCheckoutRequest,
     _current_user=Depends(require_roles("customer")),
 ):
+    quote_started = time.perf_counter()
+    logger.info(
+        "Catalogue quote request started: product_id=%s quantity=%s",
+        payload.product_id,
+        payload.quantity,
+    )
     try:
-        return await quote_exact_catalogue_product(
+        quote = await quote_exact_catalogue_product(
             payload.requirements,
             payload.product_id,
             payload.quantity,
         )
+        logger.info(
+            "Catalogue quote request completed: product_id=%s quantity=%s elapsed_ms=%s",
+            payload.product_id,
+            payload.quantity,
+            round((time.perf_counter() - quote_started) * 1000),
+        )
+        return quote
     except PermissionError as exc:
+        logger.warning(
+            "Catalogue quote eligibility rejected: product_id=%s elapsed_ms=%s reason=%s",
+            payload.product_id,
+            round((time.perf_counter() - quote_started) * 1000),
+            str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
+        logger.warning(
+            "Catalogue quote validation failed: product_id=%s elapsed_ms=%s reason=%s",
+            payload.product_id,
+            round((time.perf_counter() - quote_started) * 1000),
+            str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("Catalogue checkout quote failed.", extra={"error_type": type(exc).__name__})
+        logger.exception(
+            "Catalogue checkout quote failed: product_id=%s elapsed_ms=%s error_type=%s",
+            payload.product_id,
+            round((time.perf_counter() - quote_started) * 1000),
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The product price and availability could not be verified.",

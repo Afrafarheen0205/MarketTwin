@@ -1,11 +1,12 @@
 import logging
 import re
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional, Sequence
 
 from app.core.config import Settings, get_settings
-from app.schemas.ai import RequirementDraft
+from app.schemas.ai import RequirementDraft, normalize_commercial_requirement_fields
 from app.schemas.product_matching import (
     ConstraintEvaluation,
     ConstraintState,
@@ -286,13 +287,33 @@ class ProductMatchingService:
         self._catalogue_service = catalogue_service or BuyoraCatalogueService(self._settings)
         self._explanation_provider = explanation_provider or OllamaProvider(self._settings)
 
-    async def match(self, draft: RequirementDraft) -> ProductMatchingResponse:
-        draft = RequirementDraft.model_validate(draft.model_dump())
+    async def match(
+        self,
+        draft: RequirementDraft,
+        *,
+        include_ai_explanation: bool = True,
+    ) -> ProductMatchingResponse:
+        draft_values = {
+            "product_name": draft.product_name,
+            "product_type": draft.product_type,
+            "category": draft.category,
+            "mandatory_requirements": draft.mandatory_requirements,
+            "optional_preferences": draft.optional_preferences,
+            "commercial_constraints": draft.commercial_constraints,
+            "delivery_constraints": draft.delivery_constraints,
+        }
+        draft = RequirementDraft.model_validate(
+            normalize_commercial_requirement_fields(draft_values)
+        )
+        catalogue_started = time.perf_counter()
         snapshot = await self._catalogue_service.fetch_products()
+        catalogue_elapsed_ms = round((time.perf_counter() - catalogue_started) * 1000)
+        evaluation_started = time.perf_counter()
         candidates = [
             _evaluate_product(record, *_product_relevance(record, draft), draft)
             for record in snapshot.products
         ]
+        evaluation_elapsed_ms = round((time.perf_counter() - evaluation_started) * 1000)
         rankable = [
             candidate
             for candidate in candidates
@@ -339,7 +360,9 @@ class ProductMatchingService:
         unverified = [candidate for candidate in near if candidate.unknown]
         best_product_id = exact[0].record.product_id if exact else None
         explanation = _deterministic_explanation(exact, near, excluded)
-        if candidates:
+        explanation_elapsed_ms = 0
+        if candidates and include_ai_explanation:
+            explanation_started = time.perf_counter()
             explanation = await self._explain_with_ollama(
                 draft,
                 exact[:MAX_AI_EXPLANATION_PRODUCTS],
@@ -347,6 +370,20 @@ class ProductMatchingService:
                 excluded[:MAX_AI_EXPLANATION_PRODUCTS],
                 explanation,
             )
+            explanation_elapsed_ms = round(
+                (time.perf_counter() - explanation_started) * 1000
+            )
+
+        logger.info(
+            "Product matching stages complete: catalogue_ms=%s evaluation_ms=%s "
+            "ai_explanation_ms=%s products=%s exact=%s near=%s",
+            catalogue_elapsed_ms,
+            evaluation_elapsed_ms,
+            explanation_elapsed_ms,
+            len(snapshot.products),
+            len(exact),
+            len(near),
+        )
 
         unresolved = _unresolved_requirements(draft)
         return ProductMatchingResponse(

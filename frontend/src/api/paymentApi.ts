@@ -68,7 +68,7 @@ export const quoteCatalogueCheckout = async (
     product_id: context.productId,
     quantity,
     requirements: context.requirements,
-  });
+  }, { timeout: 90000 });
   return data;
 };
 

@@ -1,8 +1,12 @@
+import asyncio
+
 import pytest
 
 from app.schemas.ai import RequirementDraft
+from app.services import product_matching_service as matching_module
 from app.services.buyora_catalogue_service import CatalogueProduct, CatalogueSnapshot
 from app.services.product_matching_service import ProductMatchingService
+from app.services import order_service
 
 
 class _Catalogue:
@@ -52,7 +56,12 @@ def _laptop_requirements():
             "storage": "512GB SSD",
             "display_size": "13.4 inches",
             "display_type": "FHD+",
-            "Max Budget Unit Price": "INR 80000",
+            "Price Type": "maximum",
+            "Maximum unit price": {"value": "80,000", "currency": "INR"},
+            "Minimum unit price": {"value": "70,000", "currency": "INR"},
+            "Budget": {"value": "80,000", "currency": "INR"},
+            "Quantity": "1",
+            "Unit": "unit",
         },
         commercial_constraints={
             "quantity": "1",
@@ -72,9 +81,14 @@ def _service(products):
 def test_maximum_budget_attribute_is_normalized_as_commercial_constraint():
     draft = _laptop_requirements()
 
-    assert "Max Budget Unit Price" not in draft.mandatory_requirements
+    assert "Price Type" not in draft.mandatory_requirements
+    assert "Maximum unit price" not in draft.mandatory_requirements
     assert draft.commercial_constraints["maximum_target_unit_price"] == "80000"
+    assert draft.commercial_constraints["minimum_target_unit_price"] == "70000"
     assert draft.commercial_constraints["currency"] == "INR"
+    assert draft.commercial_constraints["price_type"] == "maximum"
+    assert draft.commercial_constraints["quantity"] == "1"
+    assert draft.commercial_constraints["unit"] == "unit"
 
 
 @pytest.mark.anyio
@@ -97,13 +111,61 @@ async def test_discounted_price_at_or_below_maximum_is_exact_for_all_passing_spe
         budget_results = [
             result
             for result in product.mandatory_results
-            if result.attribute == "maximum_target_unit_price"
+            if result.attribute == "max_target_unit_price"
         ]
         assert len(budget_results) == 1
-        assert not any(
-            result.attribute.casefold() == "max budget unit price"
+        assert any(
+            result.attribute == "min_target_unit_price"
+            and result.state == "PASS"
             for result in product.mandatory_results
         )
+        assert not any(
+            result.attribute.casefold() in {"price type", "maximum unit price"}
+            for result in product.mandatory_results
+        )
+
+
+@pytest.mark.anyio
+async def test_commercial_budget_fields_never_enter_catalogue_attribute_matching(monkeypatch):
+    evaluated_attributes = []
+    evaluate_attribute = matching_module._evaluate_attribute
+
+    def record_attribute(record, key, value, source, preference=False):
+        evaluated_attributes.append(key.casefold())
+        return evaluate_attribute(record, key, value, source, preference)
+
+    monkeypatch.setattr(matching_module, "_evaluate_attribute", record_attribute)
+    draft = RequirementDraft.model_construct(
+        product_name="Dell XPS 13 laptop",
+        product_type="Laptop",
+        category="Computers",
+        mandatory_requirements={
+            "processor": "Intel Core i7",
+            "ram": "16GB",
+            "storage": "512GB SSD",
+            "display_size": "13.4 inches",
+            "display_type": "FHD+",
+            "Price Type": "maximum",
+            "Maximum unit price": {"value": "80,000", "currency": "INR"},
+            "Budget": {"value": "80,000", "currency": "INR"},
+            "Quantity": "1",
+            "Unit": "unit",
+        },
+        optional_preferences={},
+        commercial_constraints={"quantity": "1", "unit": "unit", "currency": "INR"},
+        delivery_constraints={},
+    )
+
+    response = await _service([_laptop("LAPTOP-101")]).match(draft)
+
+    assert evaluated_attributes == [
+        "processor",
+        "ram",
+        "storage",
+        "display_size",
+        "display_type",
+    ]
+    assert response.exact_match_count == 1
 
 
 @pytest.mark.anyio
@@ -116,7 +178,22 @@ async def test_price_above_maximum_fails_and_is_excluded():
     assert not response.products
     assert len(response.excluded_products) == 1
     assert any(
-        result.attribute == "maximum_target_unit_price" and result.state == "FAIL"
+        result.attribute == "max_target_unit_price" and result.state == "FAIL"
+        for result in response.excluded_products[0].mandatory_results
+    )
+
+
+@pytest.mark.anyio
+async def test_currency_mismatch_is_unknown_and_not_exact():
+    response = await _service(
+        [_laptop("LAPTOP-CURRENCY-MISMATCH", currency="USD")]
+    ).match(_laptop_requirements())
+
+    assert response.exact_match_count == 0
+    assert not response.products
+    assert len(response.excluded_products) == 1
+    assert any(
+        result.attribute == "max_target_unit_price" and result.state == "UNKNOWN"
         for result in response.excluded_products[0].mandatory_results
     )
 
@@ -143,7 +220,38 @@ async def test_unverifiable_price_or_currency_is_unknown_and_not_exact(price, cu
     assert not response.products
     assert len(response.excluded_products) == 1
     assert any(
-        result.attribute == "maximum_target_unit_price"
+        result.attribute == "max_target_unit_price"
         and result.state == "UNKNOWN"
         for result in response.excluded_products[0].mandatory_results
     )
+
+
+@pytest.mark.anyio
+async def test_unknown_technical_requirement_remains_unknown():
+    draft = _laptop_requirements()
+    draft.mandatory_requirements["touchscreen"] = "Yes"
+
+    response = await _service([_laptop("LAPTOP-UNKNOWN-TECH")]).match(draft)
+
+    assert response.exact_match_count == 0
+    assert len(response.near_matches) == 1
+    assert any(
+        result.attribute == "touchscreen" and result.state == "UNKNOWN"
+        for result in response.near_matches[0].mandatory_results
+    )
+
+
+def test_checkout_uses_corrected_matcher_result(monkeypatch):
+    matcher = _service([_laptop("LAPTOP-101")])
+    monkeypatch.setattr(order_service, "ProductMatchingService", lambda: matcher)
+
+    quote = asyncio.run(
+        order_service.quote_exact_catalogue_product(
+            _laptop_requirements(),
+            "LAPTOP-101",
+            1,
+        )
+    )
+
+    assert quote["product"]["product_id"] == "LAPTOP-101"
+    assert quote["unit_price"] == "79999.00"

@@ -1,10 +1,14 @@
 from typing import Any, Dict, Optional
 from decimal import Decimal, InvalidOperation
 import re
+import logging
+import time
 
 from app.core.supabase import get_supabase_client, get_supabase_service_client
 from app.schemas.ai import RequirementDraft
 from app.services.product_matching_service import ProductMatchingService
+
+logger = logging.getLogger("markettwin.orders")
 
 
 def _client():
@@ -64,7 +68,20 @@ async def quote_exact_catalogue_product(
     if not product_id.strip() or quantity < 1:
         raise ValueError("A product and positive quantity are required.")
 
-    match_result = await ProductMatchingService().match(requirements)
+    match_started = time.perf_counter()
+    match_result = await ProductMatchingService().match(
+        requirements,
+        include_ai_explanation=False,
+    )
+    logger.info(
+        "Catalogue quote matching completed: product_id=%s quantity=%s "
+        "elapsed_ms=%s exact_matches=%s catalogue_products=%s",
+        product_id,
+        quantity,
+        round((time.perf_counter() - match_started) * 1000),
+        match_result.exact_match_count,
+        match_result.catalogue_products_examined,
+    )
     product = next(
         (
             candidate

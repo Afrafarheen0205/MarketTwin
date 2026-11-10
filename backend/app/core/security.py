@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -82,6 +83,9 @@ def get_current_user(
     request: Request = None,
 ) -> Dict[str, Any]:
     """Verify a Supabase JWT and return the authenticated user payload."""
+    is_checkout_quote = bool(
+        request and request.url.path.endswith("/customer/orders/quote")
+    )
     if credentials is None or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,6 +99,7 @@ def get_current_user(
             detail="Supabase authentication is not configured.",
         )
 
+    auth_started = time.perf_counter()
     try:
         response = client.auth.get_user(credentials.credentials)
     except Exception as exc:
@@ -115,10 +120,20 @@ def get_current_user(
             _diagnostic_token_match(request, credentials.credentials),
             json.dumps(_unverified_jwt_claims(credentials.credentials), sort_keys=True),
         )
+        if is_checkout_quote:
+            logger.warning(
+                "Checkout quote authentication failed: stage=get_user elapsed_ms=%s",
+                round((time.perf_counter() - auth_started) * 1000),
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token.",
         ) from exc
+    if is_checkout_quote:
+        logger.info(
+            "Checkout quote authentication stage completed: stage=get_user elapsed_ms=%s",
+            round((time.perf_counter() - auth_started) * 1000),
+        )
 
     user = getattr(response, "user", None)
     if user is None:
@@ -135,6 +150,7 @@ def get_current_user(
             detail="Unable to resolve authenticated user.",
         )
 
+    profile_started = time.perf_counter()
     try:
         profile_res = (
             client.table("profiles")
@@ -145,10 +161,20 @@ def get_current_user(
         )
     except Exception as exc:
         logger.warning("Unable to resolve the authenticated user's profile role.")
+        if is_checkout_quote:
+            logger.warning(
+                "Checkout quote authentication failed: stage=profile_role elapsed_ms=%s",
+                round((time.perf_counter() - profile_started) * 1000),
+            )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Account role verification is temporarily unavailable.",
         ) from exc
+    if is_checkout_quote:
+        logger.info(
+            "Checkout quote authentication stage completed: stage=profile_role elapsed_ms=%s",
+            round((time.perf_counter() - profile_started) * 1000),
+        )
 
     profile = getattr(profile_res, "data", None)
     role = profile.get("role") if isinstance(profile, dict) else None
