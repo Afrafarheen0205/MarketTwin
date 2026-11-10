@@ -33,6 +33,10 @@ export interface CreateOrderPayload {
 }
 
 export const fetchOrders = async (filters?: { customerId?: string; merchantId?: string }) => {
+  if (filters?.customerId) {
+    const { data } = await axiosClient.get<{ items: unknown[] }>('/api/v1/customer/orders');
+    return data.items;
+  }
   if (!supabase) return [];
   let query = supabase.from('orders').select('*').order('created_at', { ascending: false });
   if (filters?.customerId) {

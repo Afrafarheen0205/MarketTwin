@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     PAYPAL_CLIENT_ID: str = Field(default="", description="PayPal client ID")
     PAYPAL_CLIENT_SECRET: str = Field(default="", description="PayPal client secret")
     PAYPAL_MODE: str = Field(default="sandbox", description="PayPal mode: sandbox or live")
+    PAYPAL_INR_TO_USD_TEST_RATE: str = Field(
+        default="",
+        description="Explicit INR-to-USD exchange rate for PayPal Sandbox testing; USD per INR.",
+    )
 
     @property
     def cors_origins(self) -> List[str]:

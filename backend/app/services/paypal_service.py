@@ -1,4 +1,7 @@
 import base64
+import logging
+import re
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -10,10 +13,81 @@ from app.core.config import get_settings
 
 _PAYPAL_TIMEOUT_SECONDS = 10.0
 _SANDBOX_BASE_URL = "https://api-m.sandbox.paypal.com"
+logger = logging.getLogger("markettwin.paypal")
 
 
 class PayPalConnectionError(RuntimeError):
     """A safe, non-sensitive PayPal connection failure."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        debug_id: str | None = None,
+        issue_codes: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.debug_id = debug_id
+        self.issue_codes = issue_codes
+
+
+def _paypal_rejection_context(response: httpx.Response) -> tuple[str, str | None, tuple[str, ...]]:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    name = payload.get("name")
+    safe_name = (
+        re.sub(r"[^A-Za-z0-9_.-]", "", name)[:80]
+        if isinstance(name, str)
+        else "provider_error"
+    )
+    raw_debug_id = payload.get("debug_id") or response.headers.get("PayPal-Debug-Id")
+    debug_id = (
+        re.sub(r"[^A-Za-z0-9_-]", "", raw_debug_id)[:80]
+        if isinstance(raw_debug_id, str)
+        else None
+    )
+    details = payload.get("details")
+    issues = tuple(
+        sorted(
+            {
+                re.sub(r"[^A-Za-z0-9_.-]", "", detail["issue"])[:80]
+                for detail in details
+                if isinstance(detail, dict)
+                and isinstance(detail.get("issue"), str)
+            }
+        )
+    ) if isinstance(details, list) else ()
+    return safe_name, debug_id, issues
+
+
+def _raise_paypal_rejection(response: httpx.Response, operation: str) -> None:
+    error_name, debug_id, issue_codes = _paypal_rejection_context(response)
+    logger.warning(
+        "PayPal Sandbox rejected %s: http_status=%s error_name=%s issue_codes=%s debug_id=%s",
+        operation,
+        response.status_code,
+        error_name,
+        ",".join(issue_codes) or "not_provided",
+        debug_id or "not_provided",
+    )
+    details = [f"HTTP {response.status_code}", error_name]
+    if issue_codes:
+        details.append(f"issues: {', '.join(issue_codes)}")
+    if debug_id:
+        details.append(f"debug ID: {debug_id}")
+    raise PayPalConnectionError(
+        f"PayPal Sandbox rejected {operation} ({'; '.join(details)}).",
+        status_code=response.status_code,
+        debug_id=debug_id,
+        issue_codes=issue_codes,
+    )
 
 
 @dataclass(frozen=True)
@@ -124,6 +198,7 @@ async def create_paypal_order(
     return_url: str | None = None,
     cancel_url: str | None = None,
 ) -> dict:
+    started = time.perf_counter()
     token = await get_access_token()
     amount_value = Decimal(str(amount))
     if not amount_value.is_finite() or amount_value <= 0:
@@ -158,8 +233,15 @@ async def create_paypal_order(
         async with httpx.AsyncClient(timeout=_PAYPAL_TIMEOUT_SECONDS) as client:
             if request_id:
                 client.headers["PayPal-Request-Id"] = request_id
+            endpoint = f"{_base_url()}/v2/checkout/orders"
+            logger.info(
+                "Creating PayPal Sandbox order: endpoint=%s amount=%s currency=%s",
+                endpoint,
+                f"{amount_value:.2f}",
+                currency,
+            )
             response = await client.post(
-                f"{_base_url()}/v2/checkout/orders",
+                endpoint,
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
@@ -167,14 +249,21 @@ async def create_paypal_order(
                 json=request_payload,
             )
     except httpx.TimeoutException as exc:
+        logger.warning(
+            "PayPal Sandbox order creation timed out: elapsed_ms=%s",
+            round((time.perf_counter() - started) * 1000),
+        )
         raise PayPalConnectionError("PayPal order creation timed out.") from exc
     except httpx.HTTPError as exc:
+        logger.warning(
+            "PayPal Sandbox order request failed: error_type=%s elapsed_ms=%s",
+            type(exc).__name__,
+            round((time.perf_counter() - started) * 1000),
+        )
         raise PayPalConnectionError("Unable to connect to PayPal Orders API.") from exc
 
     if not response.is_success:
-        raise PayPalConnectionError(
-            f"PayPal rejected order creation (HTTP {response.status_code})."
-        )
+        _raise_paypal_rejection(response, "order creation")
     try:
         result = response.json()
     except ValueError as exc:
@@ -186,6 +275,11 @@ async def create_paypal_order(
         if not approval_url:
             raise PayPalConnectionError("PayPal order response did not contain a valid approval link.")
         result["approval_url"] = approval_url
+    logger.info(
+        "PayPal Sandbox order created: http_status=%s elapsed_ms=%s",
+        response.status_code,
+        round((time.perf_counter() - started) * 1000),
+    )
     return result
 
 

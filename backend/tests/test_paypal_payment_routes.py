@@ -26,6 +26,11 @@ _PAYMENT = {
     "provider_capture_id": None,
     "amount": "120.00",
     "currency": "USD",
+    "paypal_amount": "120.00",
+    "paypal_currency": "USD",
+    "exchange_rate": "1.00000000",
+    "exchange_rate_source": "Native USD order",
+    "conversion_timestamp": "2026-01-01T00:00:00+00:00",
     "status": "Created",
 }
 _COMPLETED_CAPTURE = {
@@ -63,10 +68,15 @@ def test_create_payment_persists_provider_order(monkeypatch):
     monkeypatch.setattr(
         orders,
         "begin_paypal_payment",
-        lambda customer_id, order_id: {
+        lambda customer_id, order_id, currency, existing_payment: {
             "payment_id": "payment-id",
             "amount": "120.00",
             "currency": "USD",
+            "paypal_amount": "120.00",
+            "paypal_currency": "USD",
+            "exchange_rate": "1.00000000",
+            "exchange_rate_source": "Native USD order",
+            "conversion_timestamp": "2026-01-01T00:00:00+00:00",
         },
     )
     create_order = AsyncMock(
@@ -96,6 +106,13 @@ def test_create_payment_persists_provider_order(monkeypatch):
         "paypal_order_id": "paypal-order-id",
         "status": "CREATED",
         "approval_url": "https://www.sandbox.paypal.com/checkoutnow?token=paypal-order-id",
+        "original_amount": Decimal("120.00"),
+        "original_currency": "USD",
+        "paypal_amount": Decimal("120.00"),
+        "paypal_currency": "USD",
+        "exchange_rate": Decimal("1.00000000"),
+        "exchange_rate_source": "Native USD order",
+        "conversion_timestamp": "2026-01-01T00:00:00+00:00",
     }
     create_order.assert_awaited_once_with(
         Decimal("120.00"),
@@ -134,6 +151,64 @@ def test_create_payment_reuses_existing_paypal_order(monkeypatch):
     assert result["paypal_order_id"] == "paypal-order-id"
     assert result["approval_url"].startswith("https://www.sandbox.paypal.com/")
     fetch.assert_awaited_once_with("paypal-order-id")
+
+
+def test_create_payment_returns_sanitized_sandbox_rejection(monkeypatch):
+    inr_order = {**_ORDER, "total_amount": "79999.00", "currency": "INR"}
+    monkeypatch.setattr(orders, "get_order", lambda customer_id, order_id: inr_order)
+    monkeypatch.setattr(orders, "get_paypal_payment", lambda customer_id, order_id: None)
+    monkeypatch.setattr(orders, "paypal_environment", lambda: "sandbox")
+    monkeypatch.setattr(
+        orders,
+        "get_settings",
+        lambda: type("SettingsStub", (), {"FRONTEND_URL": "http://localhost:5173"})(),
+    )
+    monkeypatch.setattr(
+        orders,
+        "begin_paypal_payment",
+        lambda customer_id, order_id, currency, existing_payment: {
+            "payment_id": "payment-id",
+            "amount": "79999.00",
+            "currency": "INR",
+            "paypal_amount": "999.99",
+            "paypal_currency": "USD",
+            "exchange_rate": "0.01250000",
+            "exchange_rate_source": "Configured Sandbox test rate",
+            "conversion_timestamp": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        orders,
+        "create_paypal_order",
+        AsyncMock(
+            side_effect=orders.PayPalConnectionError(
+                "PayPal Sandbox rejected order creation (HTTP 422; "
+                "UNPROCESSABLE_ENTITY; issues: CURRENCY_NOT_SUPPORTED; "
+                "debug ID: sandbox-debug-123).",
+                status_code=422,
+                debug_id="sandbox-debug-123",
+                issue_codes=("CURRENCY_NOT_SUPPORTED",),
+            )
+        ),
+    )
+    failed = {}
+
+    def mark_failed(customer_id, order_id, payment_id):
+        failed.update(customer_id=customer_id, order_id=order_id, payment_id=payment_id)
+
+    monkeypatch.setattr(orders, "fail_paypal_payment", mark_failed)
+
+    with pytest.raises(HTTPException) as error:
+        _run(orders.create_paypal_payment("order-id", _CUSTOMER))
+
+    assert error.value.status_code == 502
+    assert "CURRENCY_NOT_SUPPORTED" in error.value.detail
+    assert "sandbox-debug-123" in error.value.detail
+    assert failed == {
+        "customer_id": "customer-id",
+        "order_id": "order-id",
+        "payment_id": "payment-id",
+    }
 
 
 def test_successful_capture_persists_verified_capture(monkeypatch):

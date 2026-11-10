@@ -1,7 +1,7 @@
 import logging
 import time
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -31,6 +31,7 @@ from app.services.order_service import (
     release_paypal_capture,
     record_paypal_order,
 )
+from app.services.paypal_currency import PayPalConversionError
 from app.services.paypal_service import (
     PayPalConnectionError,
     capture_paypal_order,
@@ -55,6 +56,7 @@ class CatalogueCheckoutRequest(BaseModel):
     product_id: str = Field(..., min_length=1, max_length=160)
     quantity: int = Field(..., ge=1, le=1_000_000)
     requirements: RequirementDraft
+    match_classification: Literal["EXACT_MATCH", "CLOSEST_ALTERNATIVE"] = "EXACT_MATCH"
 
 
 class CatalogueOrderCreateRequest(CatalogueCheckoutRequest):
@@ -71,6 +73,9 @@ class CatalogueQuoteResponse(BaseModel):
     tax: Optional[Decimal]
     total: Decimal
     currency: str
+    paypal_conversion: Optional[Dict[str, str]]
+    paypal_conversion_error: Optional[str]
+    match_classification: Literal["EXACT_MATCH", "CLOSEST_ALTERNATIVE"]
 
 
 class CatalogueOrderResponse(BaseModel):
@@ -86,12 +91,20 @@ class CatalogueOrderResponse(BaseModel):
     currency: str
     payment_status: str
     order_status: str
+    match_classification: Literal["EXACT_MATCH", "CLOSEST_ALTERNATIVE"]
 
 
 class PayPalCreateResponse(BaseModel):
     paypal_order_id: str
     status: str
     approval_url: HttpUrl
+    original_amount: Decimal
+    original_currency: str
+    paypal_amount: Decimal
+    paypal_currency: str
+    exchange_rate: Decimal
+    exchange_rate_source: str
+    conversion_timestamp: str
 
 
 class PayPalCaptureResponse(BaseModel):
@@ -145,6 +158,7 @@ async def quote_catalogue_checkout(
             payload.requirements,
             payload.product_id,
             payload.quantity,
+            payload.match_classification,
         )
         logger.info(
             "Catalogue quote request completed: product_id=%s quantity=%s elapsed_ms=%s",
@@ -196,6 +210,7 @@ async def create_catalogue_checkout(
             payload.requirements,
             payload.product_id,
             payload.quantity,
+            payload.match_classification,
         )
         order = create_catalogue_order(
             current_user["id"],
@@ -279,6 +294,20 @@ async def create_paypal_payment(order_id: str, current_user=Depends(require_role
             and existing_payment.get("status") == "Created"
             and existing_payment.get("provider_order_id")
         ):
+            required_conversion_fields = (
+                "amount",
+                "currency",
+                "paypal_amount",
+                "paypal_currency",
+                "exchange_rate",
+                "exchange_rate_source",
+                "conversion_timestamp",
+            )
+            if any(existing_payment.get(key) is None for key in required_conversion_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="The saved PayPal payment has no verified currency conversion. Contact support before continuing.",
+                )
             existing_paypal_order = await get_paypal_order(existing_payment["provider_order_id"])
             if (
                 existing_paypal_order.get("id") != existing_payment["provider_order_id"]
@@ -289,13 +318,47 @@ async def create_paypal_payment(order_id: str, current_user=Depends(require_role
                 "paypal_order_id": existing_payment["provider_order_id"],
                 "status": existing_paypal_order.get("status"),
                 "approval_url": existing_paypal_order["approval_url"],
+                "original_amount": existing_payment["amount"],
+                "original_currency": existing_payment["currency"],
+                "paypal_amount": existing_payment["paypal_amount"],
+                "paypal_currency": existing_payment["paypal_currency"],
+                "exchange_rate": existing_payment["exchange_rate"],
+                "exchange_rate_source": existing_payment["exchange_rate_source"],
+                "conversion_timestamp": existing_payment["conversion_timestamp"],
             }
-        payment = begin_paypal_payment(current_user["id"], order_id)
-        amount = Decimal(str(payment["amount"]))
-        currency = payment["currency"]
+        payment = begin_paypal_payment(
+            current_user["id"],
+            order_id,
+            order.get("currency") or "",
+            existing_payment,
+        )
+        amount = Decimal(str(payment["paypal_amount"]))
+        currency = payment["paypal_currency"]
+        conversion_details = {
+            "original_amount": Decimal(str(payment["amount"])),
+            "original_currency": payment["currency"],
+            "paypal_amount": amount,
+            "paypal_currency": currency,
+            "exchange_rate": Decimal(str(payment["exchange_rate"])),
+            "exchange_rate_source": payment["exchange_rate_source"],
+            "conversion_timestamp": str(payment["conversion_timestamp"]),
+        }
         payment_id = payment["payment_id"]
-        if not amount.is_finite() or amount <= 0 or not isinstance(currency, str):
+        if (
+            not amount.is_finite()
+            or amount <= 0
+            or currency != "USD"
+            or conversion_details["original_amount"] != Decimal(str(order["total_amount"]))
+            or conversion_details["original_currency"] != order.get("currency")
+        ):
             raise RuntimeError("Payment persistence returned invalid order terms.")
+    except HTTPException:
+        raise
+    except PayPalConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except PaymentConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -317,6 +380,15 @@ async def create_paypal_payment(order_id: str, current_user=Depends(require_role
             cancel_url=_frontend_payment_url("/customer/payment/cancelled", order_id),
         )
     except PayPalConnectionError as exc:
+        logger.warning(
+            "PayPal Sandbox order creation rejected: order_id=%s http_status=%s "
+            "issue_codes=%s debug_id=%s error=%s",
+            order_id,
+            exc.status_code,
+            ",".join(exc.issue_codes) or "not_provided",
+            exc.debug_id or "not_provided",
+            str(exc),
+        )
         try:
             fail_paypal_payment(current_user["id"], order_id, payment_id)
         except Exception as persistence_exc:
@@ -330,7 +402,7 @@ async def create_paypal_payment(order_id: str, current_user=Depends(require_role
             ) from persistence_exc
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="PayPal could not create the payment order.",
+            detail=str(exc),
         ) from exc
     except Exception as exc:
         logger.error("PayPal order creation failed.", extra={"error_type": type(exc).__name__})
@@ -390,6 +462,7 @@ async def create_paypal_payment(order_id: str, current_user=Depends(require_role
         "paypal_order_id": paypal_order_id,
         "status": paypal_order.get("status"),
         "approval_url": approval_url,
+        **conversion_details,
     }
 
 
@@ -555,14 +628,15 @@ async def capture_paypal_payment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PayPal capture details are incomplete.")
     try:
         captured_amount = Decimal(amount_data["value"])
-        expected_amount = Decimal(str(payment["amount"]))
+        expected_amount = Decimal(str(payment["paypal_amount"]))
     except (InvalidOperation, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PayPal capture amount is invalid.") from exc
     captured_currency = amount_data["currency_code"].upper()
-    expected_currency = str(payment.get("currency", "")).upper()
+    expected_currency = str(payment.get("paypal_currency", "")).upper()
     if (
         not captured_amount.is_finite()
         or captured_amount != expected_amount
+        or expected_currency != "USD"
         or captured_currency != expected_currency
     ):
         _release_capture_or_503(

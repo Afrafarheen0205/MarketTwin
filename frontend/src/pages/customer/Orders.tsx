@@ -17,6 +17,16 @@ import { fetchOrders, subscribeToOrders } from '../../services/orderService';
 
 const { Title, Text, Paragraph } = Typography;
 
+const formatOrderPrice = (value: string | number, currency: string): string => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return 'Not specified';
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
+};
+
 export const Orders: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -84,7 +94,13 @@ export const Orders: React.FC = () => {
       title: 'Product Title',
       dataIndex: 'product_name',
       key: 'product_name',
-      render: (name) => <span style={{ fontWeight: 600, color: '#172B4D' }}>{name}</span>,
+      render: (name, record) => (
+        <div>
+          <span style={{ fontWeight: 600, color: '#172B4D' }}>{name}</span>
+          {record.product_id && <div style={{ fontSize: 11, color: '#64748B' }}>ID: {record.product_id}</div>}
+          {record.match_classification === 'CLOSEST_ALTERNATIVE' && <Tag color="gold">Closest alternative</Tag>}
+        </div>
+      ),
     },
     {
       title: 'Fulfillment Merchant',
@@ -102,9 +118,9 @@ export const Orders: React.FC = () => {
       title: 'Total Price',
       dataIndex: 'total_price',
       key: 'total_price',
-      render: (p) => (
+      render: (p, record) => (
         <span style={{ fontWeight: 700, color: '#059669', fontSize: 13.5 }}>
-          ${Number(p).toFixed(2)}
+          {formatOrderPrice(p, record.currency || record.accepted_terms?.currency || 'USD')}
         </span>
       ),
     },
@@ -225,12 +241,41 @@ export const Orders: React.FC = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Product Name" span={2}>
-                <strong>{selectedOrder.product_name}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {selectedOrder.product_snapshot?.images?.[0] && (
+                    <img
+                      src={selectedOrder.product_snapshot.images[0]}
+                      alt={selectedOrder.product_name}
+                      style={{ width: 64, height: 64, objectFit: 'contain' }}
+                    />
+                  )}
+                  <strong>{selectedOrder.product_name}</strong>
+                </div>
               </Descriptions.Item>
+              {selectedOrder.product_id && (
+                <Descriptions.Item label="Product ID">{selectedOrder.product_id}</Descriptions.Item>
+              )}
+              {selectedOrder.match_classification && (
+                <Descriptions.Item label="Match">
+                  {selectedOrder.match_classification === 'CLOSEST_ALTERNATIVE' ? 'Closest alternative' : 'Exact match'}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="Quantity">{selectedOrder.quantity} units</Descriptions.Item>
               <Descriptions.Item label="Total Escrow Price">
-                <strong style={{ color: '#059669' }}>${Number(selectedOrder.total_price).toFixed(2)}</strong>
+                <strong style={{ color: '#059669' }}>
+                  {formatOrderPrice(
+                    selectedOrder.total_price,
+                    selectedOrder.currency || selectedOrder.accepted_terms?.currency || 'USD',
+                  )}
+                </strong>
               </Descriptions.Item>
+              {Object.keys(selectedOrder.product_snapshot?.specifications || {}).length > 0 && (
+                <Descriptions.Item label="Specifications" span={2}>
+                  {Object.entries(selectedOrder.product_snapshot.specifications)
+                    .map(([key, value]) => `${key}: ${String(value)}`)
+                    .join(' · ')}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="Merchant / Supplier">
                 {selectedOrder.merchant_name || 'Not provided'}
               </Descriptions.Item>

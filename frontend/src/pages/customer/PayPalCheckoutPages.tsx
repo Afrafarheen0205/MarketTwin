@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, InputNumber, Result, Spin, Tag, Typography } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { CatalogueQuote, MarketTwinOrder } from '../../api/paymentApi';
+import type { CatalogueQuote, MarketTwinOrder, PayPalOrderDetails } from '../../api/paymentApi';
 import {
   cancelPayPalPayment,
   capturePayPalPayment,
@@ -58,7 +58,9 @@ const OrderSummary: React.FC<{ quote: CatalogueQuote }> = ({ quote }) => (
         <Paragraph type="secondary">
           {quote.product.brand || 'Brand not specified'} · Product ID: {quote.product_id}
         </Paragraph>
-        <Tag color="green">Exact match</Tag>
+        <Tag color={quote.match_classification === 'EXACT_MATCH' ? 'green' : 'gold'}>
+          {quote.match_classification === 'EXACT_MATCH' ? 'Exact match' : 'Closest alternative'}
+        </Tag>
         <Paragraph>
           Delivery estimate: {quote.product.delivery_days === null
             ? 'Not provided by the catalogue'
@@ -75,6 +77,26 @@ const OrderSummary: React.FC<{ quote: CatalogueQuote }> = ({ quote }) => (
       <Text>Tax: {quote.tax === null ? 'Not provided' : formatMoney(quote.tax, quote.currency)}</Text>
       <Title level={4} style={{ margin: 0 }}>Total: {formatMoney(quote.total, quote.currency)}</Title>
       <Text type="secondary">The final amount is calculated by MarketTwin from the verified catalogue price.</Text>
+      {quote.paypal_conversion && (
+        <Alert
+          type="info"
+          showIcon
+          message="PayPal Sandbox currency conversion"
+          description={(
+            <div style={{ display: 'grid', gap: 4 }}>
+              <Text>
+                Rate: 1 {quote.paypal_conversion.original_currency} = {quote.paypal_conversion.exchange_rate} {quote.paypal_conversion.paypal_currency}
+              </Text>
+              <Text>PayPal Sandbox amount: {formatMoney(quote.paypal_conversion.paypal_amount, quote.paypal_conversion.paypal_currency)}</Text>
+              <Text>Source: {quote.paypal_conversion.exchange_rate_source}</Text>
+              <Text>PayPal Sandbox processes this test payment in USD. Your MarketTwin order remains priced in {quote.paypal_conversion.original_currency}.</Text>
+            </div>
+          )}
+        />
+      )}
+      {quote.paypal_conversion_error && (
+        <Alert type="warning" showIcon message="PayPal conversion is not configured" description={quote.paypal_conversion_error} />
+      )}
     </div>
   </Card>
 );
@@ -89,6 +111,7 @@ export const CheckoutPage: React.FC = () => {
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paypalIntent, setPaypalIntent] = useState<PayPalOrderDetails | null>(null);
   const quoteSequence = useRef(0);
 
   useEffect(() => {
@@ -97,6 +120,7 @@ export const CheckoutPage: React.FC = () => {
       return;
     }
     const sequence = ++quoteSequence.current;
+    setPaypalIntent(null);
     setLoadingQuote(true);
     setError(null);
     void quoteCatalogueCheckout(context, quantity)
@@ -128,7 +152,8 @@ export const CheckoutPage: React.FC = () => {
         order.currency !== quote.currency ||
         order.quantity !== quote.quantity ||
         toMinorUnits(order.unit_price) === null ||
-        toMinorUnits(order.unit_price) !== toMinorUnits(quote.unit_price)
+        toMinorUnits(order.unit_price) !== toMinorUnits(quote.unit_price) ||
+        order.match_classification !== quote.match_classification
       ) {
         const refreshedQuote = await quoteCatalogueCheckout(context, quantity);
         setQuote(refreshedQuote);
@@ -145,9 +170,18 @@ export const CheckoutPage: React.FC = () => {
       ) {
         throw new Error('PayPal returned an invalid approval link.');
       }
-      window.location.assign(approval.toString());
+      if (
+        paypal.original_currency !== quote.currency ||
+        toMinorUnits(paypal.original_amount) !== toMinorUnits(quote.total) ||
+        paypal.paypal_currency !== 'USD' ||
+        toMinorUnits(paypal.paypal_amount) === null
+      ) {
+        throw new Error('The verified PayPal conversion does not match this order. Contact support before proceeding.');
+      }
+      setPaypalIntent(paypal);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to continue to PayPal.');
+    } finally {
       setSubmitting(false);
     }
   };
@@ -169,6 +203,21 @@ export const CheckoutPage: React.FC = () => {
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
       {loadingQuote && <div style={{ padding: 24, textAlign: 'center' }}><Spin tip="Verifying product price and stock..." /></div>}
       {quote && <OrderSummary quote={quote} />}
+      {paypalIntent && (
+        <Card style={{ marginTop: 16 }}>
+          <Title level={4}>Confirm PayPal Sandbox amount</Title>
+          <Paragraph>MarketTwin order total: {formatMoney(paypalIntent.original_amount, paypalIntent.original_currency)}</Paragraph>
+          <Paragraph>Exchange rate: 1 {paypalIntent.original_currency} = {paypalIntent.exchange_rate} {paypalIntent.paypal_currency}</Paragraph>
+          <Paragraph>PayPal Sandbox charge: {formatMoney(paypalIntent.paypal_amount, paypalIntent.paypal_currency)}</Paragraph>
+          <Paragraph type="secondary">
+            This test payment is charged in USD by PayPal Sandbox. MarketTwin retains the original order total in {paypalIntent.original_currency}.
+            Rate source: {paypalIntent.exchange_rate_source}.
+          </Paragraph>
+          <Button type="primary" onClick={() => window.location.assign(paypalIntent.approval_url)}>
+            Pay {formatMoney(paypalIntent.paypal_amount, paypalIntent.paypal_currency)} in PayPal Sandbox
+          </Button>
+        </Card>
+      )}
       {!loadingQuote && (
         <div style={{ marginTop: 20 }}>
           <Text strong>Quantity</Text>
@@ -189,10 +238,10 @@ export const CheckoutPage: React.FC = () => {
         <Button
           type="primary"
           loading={submitting}
-          disabled={!quote || loadingQuote || submitting}
+          disabled={!quote || !quote.paypal_conversion || loadingQuote || submitting || Boolean(paypalIntent)}
           onClick={() => void continueToPayPal()}
         >
-          Continue to PayPal Sandbox
+          Prepare PayPal Sandbox payment
         </Button>
       </div>
     </section>

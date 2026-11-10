@@ -301,7 +301,7 @@ const ProductMatchingResults: React.FC<{
   onEdit: () => void;
   onCreateDemand: () => void;
   creatingDemand: boolean;
-  onPurchase: (product: MatchedProduct) => void;
+  onPurchase: (product: MatchedProduct, matchClassification: 'EXACT_MATCH' | 'CLOSEST_ALTERNATIVE') => void;
 }> = ({ result, onEdit, onCreateDemand, creatingDemand, onPurchase }) => {
   const comparisonProducts = [...result.products, ...result.near_matches].slice(0, 3);
   const specificationKeys = Array.from(
@@ -366,7 +366,7 @@ const ProductMatchingResults: React.FC<{
                 product.effective_price !== null &&
                 /^[A-Z]{3}$/.test(product.currency || '') &&
                 (product.stock === null || product.stock > 0)
-                  ? () => onPurchase(product)
+                  ? () => onPurchase(product, 'EXACT_MATCH')
                   : undefined
               }
             />
@@ -377,7 +377,21 @@ const ProductMatchingResults: React.FC<{
         <>
           <Title level={4}>Closest Alternatives ({result.near_match_count})</Title>
           {result.near_matches.map((product) => (
-            <ProductResultCard key={product.product_id} product={product} exact={false} />
+            <ProductResultCard
+              key={product.product_id}
+              product={product}
+              exact={false}
+              onPurchase={
+                product.effective_price !== null &&
+                /^[A-Z]{3}$/.test(product.currency || '') &&
+                (product.stock === null || product.stock > 0) &&
+                product.mandatory_results
+                  .filter((item) => item.source === 'commercial_constraints' || item.source === 'delivery_constraints')
+                  .every((item) => item.state === 'PASS')
+                  ? () => onPurchase(product, 'CLOSEST_ALTERNATIVE')
+                  : undefined
+              }
+            />
           ))}
         </>
       )}
@@ -1096,13 +1110,14 @@ export const AIRequirementConversation: React.FC = () => {
                 onEdit={editRequirements}
                 onCreateDemand={() => void startDemandCreation()}
                 creatingDemand={creatingDemand}
-                onPurchase={(product) => {
+                onPurchase={(product, matchClassification) => {
                   if (!requirementDraft) return;
                   try {
                     saveCheckoutContext({
                       productId: product.product_id,
                       requirements: requirementDraft,
                       idempotencyKey: createSecureUuid(),
+                      matchClassification,
                     });
                     navigate(`/customer/checkout?product_id=${encodeURIComponent(product.product_id)}`);
                   } catch (requestError) {

@@ -177,6 +177,47 @@ def test_create_order_returns_only_sandbox_approval_link(monkeypatch):
     assert client.headers["PayPal-Request-Id"] == "stable-request-id"
 
 
+def test_create_order_preserves_sanitized_provider_rejection(monkeypatch, caplog):
+    response = httpx.Response(
+        422,
+        json={
+            "name": "UNPROCESSABLE_ENTITY",
+            "message": "Request failed",
+            "debug_id": "sandbox-debug-123",
+            "details": [
+                {"issue": "CURRENCY_NOT_SUPPORTED", "description": "Sensitive provider detail"},
+            ],
+        },
+        request=httpx.Request(
+            "POST",
+            "https://api-m.sandbox.paypal.com/v2/checkout/orders",
+        ),
+    )
+    client = MockAsyncClient(response=response)
+    monkeypatch.setattr(
+        paypal_service,
+        "get_access_token",
+        AsyncMock(return_value="private-token"),
+    )
+    monkeypatch.setattr(
+        paypal_service,
+        "_base_url",
+        lambda: "https://api-m.sandbox.paypal.com",
+    )
+    monkeypatch.setattr(paypal_service.httpx, "AsyncClient", lambda **kwargs: client)
+
+    with pytest.raises(paypal_service.PayPalConnectionError) as error:
+        _run(paypal_service.create_paypal_order(Decimal("79999.00"), "INR"))
+
+    assert error.value.status_code == 422
+    assert error.value.issue_codes == ("CURRENCY_NOT_SUPPORTED",)
+    assert error.value.debug_id == "sandbox-debug-123"
+    assert "CURRENCY_NOT_SUPPORTED" in str(error.value)
+    assert "Sensitive provider detail" not in str(error.value)
+    assert "CURRENCY_NOT_SUPPORTED" in caplog.text
+    assert "private-token" not in caplog.text
+
+
 def test_live_paypal_approval_link_is_rejected(monkeypatch):
     response = httpx.Response(
         201,

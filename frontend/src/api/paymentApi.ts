@@ -7,6 +7,7 @@ export interface CheckoutContext {
   productId: string;
   requirements: RequirementDraft;
   idempotencyKey: string;
+  matchClassification?: 'EXACT_MATCH' | 'CLOSEST_ALTERNATIVE';
 }
 
 export interface CatalogueQuote {
@@ -19,6 +20,25 @@ export interface CatalogueQuote {
   tax: string | null;
   total: string;
   currency: string;
+  paypal_conversion: PayPalConversion | null;
+  paypal_conversion_error: string | null;
+  match_classification: 'EXACT_MATCH' | 'CLOSEST_ALTERNATIVE';
+}
+
+export interface PayPalConversion {
+  original_amount: string;
+  original_currency: string;
+  paypal_amount: string;
+  paypal_currency: string;
+  exchange_rate: string;
+  exchange_rate_source: string;
+  conversion_timestamp: string;
+}
+
+export interface PayPalOrderDetails extends PayPalConversion {
+  paypal_order_id: string;
+  approval_url: string;
+  status: string;
 }
 
 export interface MarketTwinOrder {
@@ -34,6 +54,7 @@ export interface MarketTwinOrder {
   currency: string;
   payment_status: string;
   order_status: string;
+  match_classification: 'EXACT_MATCH' | 'CLOSEST_ALTERNATIVE' | null;
 }
 
 export const saveCheckoutContext = (context: CheckoutContext): void => {
@@ -50,6 +71,8 @@ export const readCheckoutContext = (): CheckoutContext | null => {
       typeof parsed !== 'object' ||
       typeof (parsed as CheckoutContext).productId !== 'string' ||
       typeof (parsed as CheckoutContext).idempotencyKey !== 'string' ||
+      ((parsed as CheckoutContext).matchClassification !== undefined &&
+        !['EXACT_MATCH', 'CLOSEST_ALTERNATIVE'].includes((parsed as CheckoutContext).matchClassification || '')) ||
       !(parsed as CheckoutContext).requirements
     ) {
       return null;
@@ -68,6 +91,7 @@ export const quoteCatalogueCheckout = async (
     product_id: context.productId,
     quantity,
     requirements: context.requirements,
+    match_classification: context.matchClassification || 'EXACT_MATCH',
   }, { timeout: 90000 });
   return data;
 };
@@ -81,14 +105,15 @@ export const createCatalogueCheckout = async (
     quantity,
     requirements: context.requirements,
     idempotency_key: context.idempotencyKey,
+    match_classification: context.matchClassification || 'EXACT_MATCH',
   });
   return data;
 };
 
 export const createPayPalOrder = async (
   orderId: string
-): Promise<{ paypal_order_id: string; approval_url: string; status: string }> => {
-  const { data } = await axiosClient.post(
+): Promise<PayPalOrderDetails> => {
+  const { data } = await axiosClient.post<PayPalOrderDetails>(
     `/api/v1/customer/orders/${encodeURIComponent(orderId)}/payments/paypal/create`
   );
   return data;

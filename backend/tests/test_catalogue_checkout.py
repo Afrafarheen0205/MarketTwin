@@ -15,8 +15,13 @@ def _product(
     currency="USD",
     stock=4,
     mandatory_states=("PASS",),
+    mandatory_sources=None,
 ):
-    results = [SimpleNamespace(state=state) for state in mandatory_states]
+    sources = mandatory_sources or ("mandatory_requirements",) * len(mandatory_states)
+    results = [
+        SimpleNamespace(state=state, source=source)
+        for state, source in zip(mandatory_states, sources)
+    ]
     return SimpleNamespace(
         product_id=product_id,
         effective_price=effective_price,
@@ -32,8 +37,25 @@ def _product(
 
 
 def _matching(monkeypatch, products):
-    async def match(self, requirements):
-        return SimpleNamespace(products=products)
+    async def match(self, requirements, **_kwargs):
+        return SimpleNamespace(
+            products=products,
+            near_matches=[],
+            exact_match_count=len(products),
+            catalogue_products_examined=len(products),
+        )
+
+    monkeypatch.setattr(order_service.ProductMatchingService, "match", match)
+
+
+def _matching_groups(monkeypatch, products, near_matches):
+    async def match(self, requirements, **_kwargs):
+        return SimpleNamespace(
+            products=products,
+            near_matches=near_matches,
+            exact_match_count=len(products),
+            catalogue_products_examined=len(products) + len(near_matches),
+        )
 
     monkeypatch.setattr(order_service.ProductMatchingService, "match", match)
 
@@ -58,19 +80,71 @@ def test_exact_catalogue_product_creates_server_calculated_quote(monkeypatch):
     assert quote["total"] == "21.00"
     assert quote["currency"] == "USD"
     assert quote["product"]["product_id"] == "catalogue-1"
+    assert quote["match_classification"] == "EXACT_MATCH"
 
 
-def test_alternative_product_cannot_be_purchased(monkeypatch):
-    _matching(monkeypatch, [_product()])
+def test_closest_alternative_can_be_purchased_with_actual_snapshot(monkeypatch):
+    alternative = _product(
+        product_id="alternative-1",
+        mandatory_states=("UNKNOWN", "PASS"),
+        mandatory_sources=("mandatory_requirements", "commercial_constraints"),
+    )
+    _matching_groups(monkeypatch, [], [alternative])
 
-    with pytest.raises(PermissionError, match="not an exact match"):
-        _run(
-            order_service.quote_exact_catalogue_product(
-                RequirementDraft(),
-                "other",
-                1,
-            )
+    quote = _run(
+        order_service.quote_exact_catalogue_product(
+            RequirementDraft(),
+            "alternative-1",
+            1,
+            "CLOSEST_ALTERNATIVE",
         )
+    )
+
+    assert quote["product_id"] == "alternative-1"
+    assert quote["product"]["product_id"] == "alternative-1"
+    assert quote["match_classification"] == "CLOSEST_ALTERNATIVE"
+
+
+def test_exact_selection_cannot_checkout_near_match(monkeypatch):
+    alternative = _product(product_id="alternative-1")
+    _matching_groups(monkeypatch, [], [alternative])
+
+    with pytest.raises(PermissionError, match="selected match group"):
+        _run(order_service.quote_exact_catalogue_product(
+            RequirementDraft(), "alternative-1", 1, "EXACT_MATCH"
+        ))
+
+
+def test_alternative_with_failed_commercial_check_is_blocked(monkeypatch):
+    alternative = _product(
+        product_id="alternative-1",
+        mandatory_states=("UNKNOWN", "FAIL"),
+        mandatory_sources=("mandatory_requirements", "commercial_constraints"),
+    )
+    _matching_groups(monkeypatch, [], [alternative])
+
+    with pytest.raises(PermissionError, match="commercial requirements"):
+        _run(order_service.quote_exact_catalogue_product(
+            RequirementDraft(), "alternative-1", 1, "CLOSEST_ALTERNATIVE"
+        ))
+
+
+def test_alternative_respects_stock_and_currency_validation(monkeypatch):
+    unavailable = _product(product_id="alternative-1", stock=0)
+    _matching_groups(monkeypatch, [], [unavailable])
+
+    with pytest.raises(ValueError, match="exceeds the available stock"):
+        _run(order_service.quote_exact_catalogue_product(
+            RequirementDraft(), "alternative-1", 1, "CLOSEST_ALTERNATIVE"
+        ))
+
+    wrong_currency = _product(product_id="alternative-2", currency=None)
+    _matching_groups(monkeypatch, [], [wrong_currency])
+
+    with pytest.raises(ValueError, match="no verified price or currency"):
+        _run(order_service.quote_exact_catalogue_product(
+            RequirementDraft(), "alternative-2", 1, "CLOSEST_ALTERNATIVE"
+        ))
 
 
 @pytest.mark.parametrize("state", ["FAIL", "UNKNOWN"])
@@ -142,6 +216,7 @@ def test_catalogue_order_persistence_uses_only_verified_quote(monkeypatch):
         "quantity": 2,
         "unit_price": "10.50",
         "currency": "USD",
+        "match_classification": "CLOSEST_ALTERNATIVE",
     }
 
     result = order_service.create_catalogue_order("customer-id", "idempotency-key", quote)
@@ -151,3 +226,4 @@ def test_catalogue_order_persistence_uses_only_verified_quote(monkeypatch):
     assert calls["parameters"]["p_customer_id"] == "customer-id"
     assert calls["parameters"]["p_unit_price"] == "10.50"
     assert calls["parameters"]["p_quantity"] == 2
+    assert calls["parameters"]["p_match_classification"] == "CLOSEST_ALTERNATIVE"
